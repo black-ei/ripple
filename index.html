@@ -145,12 +145,6 @@
     pointer-events:none;
   }
 
-  .tool.is-confirming{
-    color:var(--signal);
-    border-color:rgba(255,90,54,.42);
-    background:rgba(255,90,54,.08);
-  }
-
   .center-action{
     position:fixed;
     top:50%;
@@ -204,6 +198,7 @@
   body[data-state="recording"] .hint{color:rgba(255,148,124,.95)}
   body[data-state="overdubbing"] .hint{color:rgba(244,196,116,.95)}
   body[data-state="playing"] .hint{color:rgba(244,240,232,.7)}
+  body[data-rerecording="true"] .hint{color:rgba(244,196,116,.95)}
 
   @media (max-width:520px){
     .topbar{padding:calc(env(safe-area-inset-top) + 18px) 16px 0}
@@ -248,13 +243,6 @@
       </svg>
     </button>
 
-    <button class="tool" id="undoBtn" type="button" aria-label="撤销最后一层" title="撤销" disabled>
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M8.2 7H4v-4"/>
-        <path d="M4.7 7.3A8.2 8.2 0 1 1 4 15.2"/>
-      </svg>
-    </button>
-
     <button class="tool" id="exportBtn" type="button" aria-label="导出 WAV" title="导出 WAV" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M12 4v11"/>
@@ -263,11 +251,10 @@
       </svg>
     </button>
 
-    <button class="tool" id="clearBtn" type="button" aria-label="清空现场" title="清空" disabled>
+    <button class="tool" id="resetBtn" type="button" aria-label="重置现场" title="重置" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
-        <path d="M5 7h14"/>
-        <path d="M9 7V5h6v2"/>
-        <path d="M8 7l.8 13h6.4L16 7"/>
+        <path d="M4 4v6h6"/>
+        <path d="M5 10a8 8 0 1 0 2.4-5.6"/>
       </svg>
     </button>
   </div>
@@ -305,9 +292,8 @@
     subhint: document.getElementById('subhint'),
     center: document.getElementById('centerAction'),
     monitor: document.getElementById('monitorBtn'),
-    undo: document.getElementById('undoBtn'),
     export: document.getElementById('exportBtn'),
-    clear: document.getElementById('clearBtn'),
+    reset: document.getElementById('resetBtn'),
     sr: document.getElementById('sr'),
   };
 
@@ -339,6 +325,8 @@
   let epoch = 0;
   let record = null;
   let processing = false;
+  let rerecording = null;
+  let longPress = null;
 
   let inputLevel = 0;
   let hover = -1;
@@ -348,9 +336,9 @@
   let lastHint = '';
   let lastSub = '';
   let lastHintAt = 0;
-  let clearArmedUntil = 0;
-  let clearTimer = 0;
   let lastActAt = 0;
+
+  const LONG_PRESS_MS = 520;
 
   const pathCache = new Map();
   const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -483,6 +471,20 @@
       return;
     }
 
+    if (rerecording) {
+      const index = rerecording.index + 1;
+      if (rerecording.finishing) {
+        setHint(`正在放入第 ${index} 层`, '把这一圈写回循环');
+      } else {
+        const elapsed = ac ? Math.max(0, ac.currentTime - rerecording.startTime) : 0;
+        setHint(
+          `正在重录第 ${index} 层`,
+          `${formatElapsed(elapsed)} / ${formatElapsed(loopLen)} · 自动替换`,
+        );
+      }
+      return;
+    }
+
     if (mode === 'recording' && record) {
       const elapsed = ac ? Math.max(0, ac.currentTime - record.start) : 0;
       setHint(
@@ -508,11 +510,11 @@
 
     if (mode === 'playing') {
       if (layers.length >= MAX_LAYERS) {
-        setHint('五层已满', '点圆环静音 · 或撤销一层');
+        setHint('五层已满', '点环静音 · 长按重录 · 或重置');
       } else {
         setHint(
           '轻触叠加一层',
-          `点圆环静音 · 已录 ${layers.length} 层 / ${MAX_LAYERS}`,
+          `点环静音 · 长按重录 · ${layers.length} / ${MAX_LAYERS}`,
         );
       }
       return;
@@ -523,12 +525,14 @@
 
   function renderChrome() {
     document.body.dataset.state = mode;
+    document.body.dataset.rerecording = rerecording ? 'true' : 'false';
     const busy =
       mode === 'recording' ||
       mode === 'overdubbing' ||
-      mode === 'processing';
+      mode === 'processing' ||
+      Boolean(rerecording);
 
-    ui.center.disabled = starting || processing;
+    ui.center.disabled = starting || processing || Boolean(rerecording);
     ui.monitor.disabled = !ac;
     ui.monitor.setAttribute('aria-pressed', monitorOn ? 'true' : 'false');
     ui.monitor.setAttribute(
@@ -537,9 +541,8 @@
     );
 
     const canUseLayers = layers.length > 0 && !busy;
-    ui.undo.disabled = !canUseLayers;
     ui.export.disabled = !canUseLayers || !loopN;
-    ui.clear.disabled = !canUseLayers;
+    ui.reset.disabled = !canUseLayers;
 
     const labels = {
       idle: '开始录制第一层',
@@ -548,7 +551,12 @@
       playing: layers.length >= MAX_LAYERS ? '已满五层' : '叠加一层',
       processing: '处理中',
     };
-    ui.center.setAttribute('aria-label', labels[mode] || '录制');
+    ui.center.setAttribute(
+      'aria-label',
+      rerecording
+        ? `正在重录第 ${rerecording.index + 1} 层`
+        : labels[mode] || '录制',
+    );
     renderHint();
   }
 
@@ -1032,7 +1040,7 @@
   function startOverdub() {
     if (!ac || !recorder || !loopLen) return;
     if (layers.length >= MAX_LAYERS) {
-      flash('五层已满', '点圆环静音 · 或撤销一层');
+      flash('五层已满', '点环静音 · 长按圆环重录', 1600);
       return;
     }
     if (ac.state === 'suspended') ac.resume().catch(() => {});
@@ -1104,7 +1112,7 @@
 
   function toggleMute(index) {
     const layer = layers[index];
-    if (!layer || !ac) return;
+    if (!layer || !ac || rerecording) return;
     layer.muted = !layer.muted;
     layer.gain.gain.setTargetAtTime(
       layer.muted ? 0 : 1,
@@ -1118,29 +1126,6 @@
     );
   }
 
-  function undoLayer() {
-    if (mode !== 'playing' || !layers.length) return;
-
-    const layer = layers.pop();
-    pathCache.delete(layer.id);
-    layer.gain.gain.setTargetAtTime(0, ac.currentTime, 0.025);
-    window.setTimeout(() => {
-      try {
-        layer.source.stop();
-        layer.source.disconnect();
-      } catch {}
-    }, 80);
-
-    if (!layers.length) {
-      resetLoop();
-      setMode('idle');
-    } else {
-      renderChrome();
-    }
-    flash('已撤销一层', layers.length ? `还剩 ${layers.length} 层` : '', 1200);
-    announce('已撤销最后一层');
-  }
-
   function resetLoop() {
     loopN = 0;
     loopLen = 0;
@@ -1148,26 +1133,202 @@
     pathCache.clear();
   }
 
-  function clearAll() {
-    if (!layers.length) return;
+  function stopLayerSource(layer, delay = 60) {
+    const source = layer.source;
+    if (!source) return;
+    layer.source = null;
+    window.setTimeout(() => {
+      try {
+        source.stop();
+        source.disconnect();
+      } catch {}
+    }, delay);
+  }
+
+  function startRerecord(index) {
+    if (
+      mode !== 'playing' ||
+      rerecording ||
+      processing ||
+      starting ||
+      !ac ||
+      !recorder ||
+      !loopN
+    ) {
+      return;
+    }
+
+    const layer = layers[index];
+    if (!layer) return;
+
+    clearFlash();
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+
+    const now = ac.currentTime;
+    const plan = {
+      index,
+      layer,
+      startTime: now,
+      phaseStart: phaseAt(now),
+      timer: 0,
+      finishing: false,
+    };
+
+    rerecording = plan;
+    layer.rerecording = true;
+    layer.gain.gain.cancelScheduledValues(now);
+    layer.gain.gain.setValueAtTime(layer.muted ? 0.0001 : 1, now);
+    layer.gain.gain.linearRampToValueAtTime(0.0001, now + 0.03);
+    stopLayerSource(layer, 70);
+
+    try {
+      recorder.start();
+    } catch {
+      restoreRerecord(plan, '重录没有开始', '再长按一次试试');
+      return;
+    }
+
+    plan.timer = window.setTimeout(finishRerecord, loopLen * 1000 + 100);
+    renderChrome();
+    announce(`开始重录第 ${index + 1} 层`);
+    flash(
+      `重录第 ${index + 1} 层`,
+      '唱或弹一圈，结束后自动替换',
+      2200,
+    );
+    if (navigator.vibrate) navigator.vibrate(8);
+  }
+
+  function restoreRerecord(plan, main, sub) {
+    if (!plan) return;
+    if (recorder && recorder.capturing) recorder.stop().catch(() => {});
+    const layer = plan.layer;
+    rerecording = null;
+
+    if (layer) {
+      layer.rerecording = false;
+      if (layer.buffer && layers.includes(layer) && ac) {
+        const at = ac.currentTime + 0.01;
+        const source = ac.createBufferSource();
+        source.buffer = layer.buffer;
+        source.loop = true;
+        source.loopStart = 0;
+        source.loopEnd = layer.buffer.duration;
+        source.connect(layer.gain);
+        source.start(at, (phaseAt(at) * loopLen) % loopLen);
+        layer.source = source;
+
+        layer.gain.gain.cancelScheduledValues(at);
+        layer.gain.gain.setValueAtTime(0.0001, at);
+        layer.gain.gain.linearRampToValueAtTime(
+          layer.muted ? 0.0001 : 1,
+          at + 0.04,
+        );
+      }
+    }
+
+    renderChrome();
+    flash(main, sub, 1800);
+    announce(main);
+  }
+
+  async function finishRerecord() {
+    const plan = rerecording;
+    if (!plan || plan.finishing) return;
+
+    plan.finishing = true;
+    clearTimeout(plan.timer);
+    renderChrome();
+
+    try {
+      await recorder.stop();
+    } catch {
+      if (rerecording === plan) {
+        restoreRerecord(plan, '重录没有结束', '保留原来那一层');
+      }
+      return;
+    }
+
+    if (rerecording !== plan) return;
+
+    const samples = recorder.extract(plan.startTime, plan.startTime + loopLen);
+    if (!samples.length || samples.length < loopN * 0.6) {
+      restoreRerecord(plan, '这一圈没有录到', '保留原来那一层');
+      return;
+    }
+
+    fadeEdges(samples, ac.sampleRate, 5);
+    const data = new Float32Array(loopN);
+    const shift = Math.floor(plan.phaseStart * loopN) % loopN;
+    const count = Math.min(loopN, samples.length);
+    for (let i = 0; i < count; i += 1) {
+      data[(i + shift) % loopN] = samples[i];
+    }
+
+    const buffer = ac.createBuffer(1, loopN, ac.sampleRate);
+    buffer.copyToChannel(data, 0);
+
+    const layer = plan.layer;
+    if (!layer || !layers.includes(layer)) {
+      rerecording = null;
+      renderChrome();
+      return;
+    }
+
+    const at = ac.currentTime + 0.02;
+    const source = ac.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.loopStart = 0;
+    source.loopEnd = buffer.duration;
+    source.connect(layer.gain);
+    source.start(at, (phaseAt(at) * loopLen) % loopLen);
+
+    layer.buffer = buffer;
+    layer.peaks = computePeaks(buffer);
+    layer.source = source;
+    layer.muted = false;
+    layer.rerecording = false;
+    pathCache.delete(layer.id);
+
+    layer.gain.gain.cancelScheduledValues(at);
+    layer.gain.gain.setValueAtTime(0.0001, at);
+    layer.gain.gain.linearRampToValueAtTime(1, at + 0.04);
+
+    rerecording = null;
+    renderChrome();
+    announce(`第 ${plan.index + 1} 层已重录`);
+    flash('这一层已替换', '继续叠加，或长按其他圆环', 1800);
+  }
+
+  function resetAll() {
+    if (!layers.length && !rerecording) return;
+
+    if (rerecording) {
+      clearTimeout(rerecording.timer);
+      rerecording = null;
+    }
+    if (record) {
+      clearTimeout(record.timer);
+      record = null;
+    }
+    if (recorder && recorder.capturing) {
+      recorder.stop().catch(() => {});
+    }
+
     layers.forEach((layer) => {
-      layer.gain.gain.setTargetAtTime(0, ac.currentTime, 0.025);
-      window.setTimeout(() => {
-        try {
-          layer.source.stop();
-          layer.source.disconnect();
-        } catch {}
-      }, 80);
+      if (ac) layer.gain.gain.setTargetAtTime(0, ac.currentTime, 0.02);
+      stopLayerSource(layer, 80);
     });
+
     layers = [];
     inputLevel = 0;
+    clearLongPress();
+    processing = false;
     resetLoop();
     setMode('idle');
-    flash('已清空', '可以重新开始', 1400);
-    announce('现场已清空');
-    clearArmedUntil = 0;
-    clearTimeout(clearTimer);
-    ui.clear.classList.remove('is-confirming');
+    flash('已重置', '所有层已移除', 1400);
+    announce('现场已重置');
   }
 
   /* ---------------------------------------------------------------- */
@@ -1175,7 +1336,7 @@
   /* ---------------------------------------------------------------- */
 
   async function act() {
-    if (processing || starting) return;
+    if (processing || starting || rerecording) return;
 
     const now = performance.now();
     if (now - lastActAt < 120) return;
@@ -1218,29 +1379,9 @@
   /* Tools                                                             */
   /* ---------------------------------------------------------------- */
 
-  function handleClear() {
+  function handleReset() {
     if (mode !== 'playing' || !layers.length) return;
-
-    if (performance.now() < clearArmedUntil) {
-      clearArmedUntil = 0;
-      ui.clear.classList.remove('is-confirming');
-      clearAll();
-      return;
-    }
-
-    clearArmedUntil = performance.now() + 2600;
-    ui.clear.classList.add('is-confirming');
-    flash('再点一次清空', '所有层都会被移除', 2400);
-    clearTimeout(clearTimer);
-    clearTimer = window.setTimeout(() => {
-      clearArmedUntil = 0;
-      ui.clear.classList.remove('is-confirming');
-    }, 2600);
-  }
-
-  function handleUndo() {
-    if (mode !== 'playing' || !layers.length) return;
-    undoLayer();
+    resetAll();
   }
 
   function handleMonitor() {
@@ -1297,7 +1438,12 @@
 
   async function exportMix() {
     if (!layers.length || !loopN || !ac) return null;
-    if (mode === 'recording' || mode === 'overdubbing' || mode === 'processing') {
+    if (
+      mode === 'recording' ||
+      mode === 'overdubbing' ||
+      mode === 'processing' ||
+      rerecording
+    ) {
       return null;
     }
 
@@ -1455,29 +1601,30 @@
   function drawLayer(layer, index, phase) {
     const radius = ringRadius(index);
     const color = layer.color;
+    const target = Boolean(rerecording && rerecording.index === index);
+    const holding = Boolean(
+      longPress && longPress.index === index && !longPress.triggered,
+    );
     const muted = layer.muted;
+    const ghosted = muted || target;
     const path = waveformPath(layer, radius);
 
     g.save();
     g.beginPath();
     g.arc(cx, cy, radius, 0, Math.PI * 2);
-    g.strokeStyle = rgba(color, muted ? 0.075 : 0.34);
+    g.strokeStyle = rgba(target ? '#f4b45e' : color, target ? 0.5 : muted ? 0.075 : 0.34);
     g.lineWidth = 1;
     g.stroke();
 
-    if (!muted) {
+    if (!ghosted) {
       g.strokeStyle = rgba(color, 0.085);
       g.lineWidth = 6;
       g.stroke(path);
     }
 
-    if (!muted) {
-      g.fillStyle = rgba(color, 0.26);
-    } else {
-      g.fillStyle = rgba(color, 0.03);
-    }
+    g.fillStyle = ghosted ? rgba(color, 0.04) : rgba(color, 0.26);
     g.fill(path);
-    g.strokeStyle = rgba(color, muted ? 0.1 : 0.72);
+    g.strokeStyle = rgba(color, ghosted ? 0.16 : 0.72);
     g.lineWidth = 0.9;
     g.stroke(path);
 
@@ -1491,11 +1638,11 @@
       cx + Math.cos(startAngle) * (radius + 4),
       cy + Math.sin(startAngle) * (radius + 4),
     );
-    g.strokeStyle = rgba(color, muted ? 0.1 : 0.34);
+    g.strokeStyle = rgba(color, ghosted ? 0.1 : 0.34);
     g.lineWidth = 1;
     g.stroke();
 
-    if (!muted) {
+    if (!ghosted) {
       const angle = startAngle + phase * Math.PI * 2;
       const px = cx + Math.cos(angle) * radius;
       const py = cy + Math.sin(angle) * radius;
@@ -1510,10 +1657,56 @@
       g.restore();
     }
 
+    if (holding) {
+      const progress = Math.min(
+        1,
+        Math.max(0, (performance.now() - longPress.startedAt) / LONG_PRESS_MS),
+      );
+      g.beginPath();
+      g.arc(cx, cy, radius, 0, Math.PI * 2);
+      g.strokeStyle = rgba('#f4b45e', 0.26);
+      g.lineWidth = 1;
+      g.stroke();
+
+      g.beginPath();
+      g.arc(cx, cy, radius, startAngle, startAngle + Math.max(0.004, progress) * Math.PI * 2);
+      g.strokeStyle = rgba('#f4b45e', 0.92);
+      g.lineWidth = 2.6;
+      g.lineCap = 'round';
+      g.shadowColor = rgba('#f4b45e', 0.7);
+      g.shadowBlur = 14;
+      g.stroke();
+      g.shadowBlur = 0;
+    }
+
+    if (target) {
+      const progress = rerecording.finishing
+        ? 1
+        : Math.min(
+            1,
+            Math.max(0, (ac.currentTime - rerecording.startTime) / loopLen),
+          );
+      g.beginPath();
+      g.arc(cx, cy, radius, 0, Math.PI * 2);
+      g.strokeStyle = rgba('#f4b45e', 0.22);
+      g.lineWidth = 1;
+      g.stroke();
+
+      g.beginPath();
+      g.arc(cx, cy, radius, startAngle, startAngle + Math.max(0.004, progress) * Math.PI * 2);
+      g.strokeStyle = rgba('#f4b45e', 0.94);
+      g.lineWidth = 2.8;
+      g.lineCap = 'round';
+      g.shadowColor = rgba('#f4b45e', 0.8);
+      g.shadowBlur = 16;
+      g.stroke();
+      g.shadowBlur = 0;
+    }
+
     if (hover === index) {
       g.beginPath();
       g.arc(cx, cy, radius + 8, 0, Math.PI * 2);
-      g.strokeStyle = rgba(color, 0.2);
+      g.strokeStyle = rgba(target ? '#f4b45e' : color, 0.2);
       g.lineWidth = 1;
       g.stroke();
     }
@@ -1584,10 +1777,11 @@
   }
 
   function drawCenter(now) {
-    const color = activeStateColor();
+    const rerecordingActive = Boolean(rerecording);
+    const color = rerecordingActive ? '#f4b45e' : activeStateColor();
     const recording = mode === 'recording';
     const overdubbing = mode === 'overdubbing';
-    const playing = mode === 'playing';
+    const playing = mode === 'playing' && !rerecordingActive;
 
     const glowStrength = 0.045 + inputLevel * 0.12;
     const glow = g.createRadialGradient(
@@ -1613,6 +1807,13 @@
       g.beginPath();
       g.arc(cx, cy, centerR, 0, Math.PI * 2);
       g.fillStyle = color;
+      g.fill();
+    } else if (rerecordingActive) {
+      g.shadowColor = rgba('#f4b45e', 0.32);
+      g.shadowBlur = 28;
+      g.beginPath();
+      g.arc(cx, cy, centerR, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(244,180,94,.07)';
       g.fill();
     } else if (playing) {
       g.shadowColor = rgba(color, 0.32);
@@ -1640,9 +1841,11 @@
     g.strokeStyle =
       recording || overdubbing
         ? 'rgba(255,255,255,.22)'
-        : playing
-          ? 'rgba(126,214,179,.68)'
-          : 'rgba(244,240,232,.16)';
+        : rerecordingActive
+          ? 'rgba(244,180,94,.5)'
+          : playing
+            ? 'rgba(126,214,179,.68)'
+            : 'rgba(244,240,232,.16)';
     g.lineWidth = 1.1;
     g.stroke();
 
@@ -1679,6 +1882,13 @@
       g.font = '400 8px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
       g.fillStyle = 'rgba(255,255,255,.42)';
       g.fillText(`LAYER ${layers.length + 1}`, cx, cy + size / 2 + 25);
+    } else if (rerecordingActive) {
+      g.font = `200 ${Math.round(centerR * 0.48)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
+      g.fillStyle = 'rgba(244,180,94,.96)';
+      g.fillText('↻', cx, cy - centerR * 0.02);
+      g.font = '600 7px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(244,180,94,.58)';
+      g.fillText(`LAYER ${rerecording.index + 1}`, cx, cy + centerR * 0.3);
     } else if (playing) {
       g.font = `200 ${Math.round(centerR * 0.62)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
       g.fillStyle = 'rgba(244,240,232,.96)';
@@ -1787,7 +1997,23 @@
     return null;
   }
 
+  function clearLongPress() {
+    if (!longPress) return;
+    const pointerId = longPress.pointerId;
+    clearTimeout(longPress.timer);
+    longPress = null;
+    try { canvas.releasePointerCapture?.(pointerId); } catch {}
+  }
+
   canvas.addEventListener('pointermove', (event) => {
+    if (longPress && event.pointerId === longPress.pointerId) {
+      const moved = Math.hypot(
+        event.clientX - longPress.x,
+        event.clientY - longPress.y,
+      );
+      if (moved > 10) clearLongPress();
+    }
+
     if (event.pointerType !== 'mouse') return;
     const rect = canvas.getBoundingClientRect();
     const hit = hitTest(event.clientX - rect.left, event.clientY - rect.top);
@@ -1806,6 +2032,7 @@
   canvas.addEventListener('pointerleave', () => {
     hover = -1;
     canvas.style.cursor = 'default';
+    clearLongPress();
   });
 
   canvas.addEventListener('pointerdown', (event) => {
@@ -1814,11 +2041,52 @@
     if (!hit) return;
     event.preventDefault();
 
-    if (hit.type === 'layer') {
-      toggleMute(hit.index);
-    } else if (hit.type === 'center') {
+    if (hit.type === 'center') {
       act();
+      return;
     }
+
+    if (hit.type !== 'layer' || rerecording || processing || starting) return;
+
+    if (mode !== 'playing') {
+      toggleMute(hit.index);
+      return;
+    }
+
+    clearLongPress();
+    const press = {
+      index: hit.index,
+      pointerId: event.pointerId,
+      x: event.clientX,
+      y: event.clientY,
+      startedAt: performance.now(),
+      triggered: false,
+      timer: 0,
+    };
+    press.timer = window.setTimeout(() => {
+      if (longPress !== press) return;
+      press.triggered = true;
+      longPress = null;
+      try { canvas.releasePointerCapture?.(press.pointerId); } catch {}
+      startRerecord(press.index);
+    }, LONG_PRESS_MS);
+    longPress = press;
+    try { canvas.setPointerCapture?.(event.pointerId); } catch {}
+  });
+
+  canvas.addEventListener('pointerup', (event) => {
+    const press = longPress;
+    if (!press || press.pointerId !== event.pointerId) return;
+    clearTimeout(press.timer);
+    longPress = null;
+    try { canvas.releasePointerCapture?.(press.pointerId); } catch {}
+    if (!press.triggered && !rerecording && mode === 'playing') {
+      toggleMute(press.index);
+    }
+  });
+
+  canvas.addEventListener('pointercancel', () => {
+    clearLongPress();
   });
 
   ui.center.addEventListener('pointerdown', (event) => {
@@ -1839,9 +2107,8 @@
   });
 
   ui.monitor.addEventListener('click', handleMonitor);
-  ui.undo.addEventListener('click', handleUndo);
   ui.export.addEventListener('click', exportMix);
-  ui.clear.addEventListener('click', handleClear);
+  ui.reset.addEventListener('click', handleReset);
 
   window.addEventListener('keydown', (event) => {
     if (event.repeat) return;
@@ -1857,12 +2124,12 @@
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key.toLowerCase();
 
-    if (key === 'u') {
-      event.preventDefault();
-      handleUndo();
-    } else if (key === 'e') {
+    if (key === 'e') {
       event.preventDefault();
       exportMix();
+    } else if (event.shiftKey && /^Digit[1-5]$/.test(event.code)) {
+      event.preventDefault();
+      startRerecord(Number(event.code.slice(5)) - 1);
     } else if (/^[1-5]$/.test(key)) {
       event.preventDefault();
       toggleMute(Number(key) - 1);
@@ -1890,7 +2157,8 @@
   window.__RIPPLE__ = {
     get mode() {
       return mode;
-    },    get layers() {
+    },
+    get layers() {
       return layers.length;
     },
     get loopLen() {
@@ -1905,11 +2173,14 @@
         monitorOn,
         audioState: ac ? ac.state : null,
         audioError: audioError ? audioError.main : null,
+        rerecording: rerecording
+          ? { index: rerecording.index, finishing: rerecording.finishing }
+          : null,
       };
     },
     mute: toggleMute,
-    undo: undoLayer,
-    clear: clearAll,
+    reset: resetAll,
+    rerecord: startRerecord,
     exportWav: exportMix,
   };
 
