@@ -1,0 +1,10 @@
+node_modules/
+/plugins/
+.tmp-profile/
+/.ripple-profile*/
+/.ripple-denied/
+/fake-mic.wav
+/ripple-*.png
+.DS_Store
+Thumbs.db
+*.log

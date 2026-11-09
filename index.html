@@ -1,0 +1,1922 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+<meta name="theme-color" content="#050505" />
+<title>Ripple — 一个人的循环</title>
+<link rel="icon" href="assets/ripple.svg" type="image/svg+xml" />
+<style>
+  :root{
+    --bg:#050505;
+    --bone:#f4f0e8;
+    --signal:#ff5a36;
+    --amber:#f4b45e;
+    --mint:#7ed6b3;
+    --center-size:200px;
+    --mono:"SF Mono","Cascadia Mono","Cascadia Code","Consolas",monospace;
+  }
+
+  *{margin:0;padding:0;box-sizing:border-box}
+
+  html,body{height:100%;overflow:hidden;background:var(--bg)}
+
+  body{
+    font-family:-apple-system,BlinkMacSystemFont,"SF Pro Display","Segoe UI","Helvetica Neue",Arial,sans-serif;
+    color:var(--bone);
+    -webkit-font-smoothing:antialiased;
+    text-rendering:optimizeLegibility;
+    -webkit-tap-highlight-color:transparent;
+    user-select:none;
+    -webkit-user-select:none;
+  }
+
+  body::before{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:0;
+    pointer-events:none;
+    background:
+      radial-gradient(62% 52% at 50% 43%, rgba(255,255,255,.05), transparent 66%),
+      radial-gradient(58% 48% at 50% 106%, rgba(255,90,54,.035), transparent 72%),
+      linear-gradient(180deg,#060606 0%,#040404 100%);
+  }
+
+  body::after{
+    content:"";
+    position:fixed;
+    inset:0;
+    z-index:3;
+    pointer-events:none;
+    box-shadow:inset 0 0 120px rgba(0,0,0,.5);
+  }
+
+  canvas{
+    position:fixed;
+    inset:0;
+    z-index:2;
+    display:block;
+    width:100%;
+    height:100%;
+    touch-action:none;
+  }
+
+  .sr-only{
+    position:absolute;
+    width:1px;height:1px;
+    padding:0;margin:-1px;
+    overflow:hidden;
+    clip:rect(0,0,0,0);
+    white-space:nowrap;
+    border:0;
+  }
+
+  .topbar{
+    position:fixed;
+    top:0;left:0;right:0;
+    z-index:10;
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    padding:calc(env(safe-area-inset-top) + 24px) 28px 0;
+    pointer-events:none;
+  }
+
+  .brand{
+    display:flex;
+    align-items:center;
+    gap:10px;
+    color:rgba(244,240,232,.72);
+    font-size:10px;
+    font-weight:600;
+    letter-spacing:.32em;
+    line-height:1;
+    text-transform:uppercase;
+    white-space:nowrap;
+  }
+
+  .brand svg{display:block;opacity:.7}
+
+  .tools{
+    display:flex;
+    align-items:center;
+    gap:4px;
+    pointer-events:auto;
+  }
+
+  .tool{
+    display:grid;
+    place-items:center;
+    width:36px;
+    height:36px;
+    padding:0;
+    border:1px solid transparent;
+    border-radius:50%;
+    background:transparent;
+    color:rgba(244,240,232,.62);
+    cursor:pointer;
+    transition:color 180ms ease,background 180ms ease,border-color 180ms ease,opacity 180ms ease;
+    touch-action:manipulation;
+  }
+
+  .tool svg{display:block;width:18px;height:18px}
+
+  .tool:hover{
+    color:rgba(244,240,232,.94);
+    background:rgba(244,240,232,.06);
+  }
+
+  .tool:focus-visible,
+  .center-action:focus-visible{
+    outline:1px solid rgba(244,240,232,.42);
+    outline-offset:4px;
+  }
+
+  .tool[aria-pressed="true"]{
+    color:var(--bone);
+    background:rgba(244,240,232,.08);
+    border-color:rgba(244,240,232,.08);
+  }
+
+  .tool:disabled{
+    opacity:.2;
+    cursor:default;
+    pointer-events:none;
+  }
+
+  .tool.is-confirming{
+    color:var(--signal);
+    border-color:rgba(255,90,54,.42);
+    background:rgba(255,90,54,.08);
+  }
+
+  .center-action{
+    position:fixed;
+    top:50%;
+    left:50%;
+    z-index:5;
+    width:var(--center-size);
+    height:var(--center-size);
+    padding:0;
+    border:0;
+    border-radius:50%;
+    background:transparent;
+    cursor:pointer;
+    transform:translate(-50%,-50%);
+    touch-action:none;
+  }
+
+  .center-action:focus-visible{outline-offset:12px}
+  .center-action:disabled{cursor:default;pointer-events:none}
+
+  .footer{
+    position:fixed;
+    left:0;right:0;bottom:0;
+    z-index:10;
+    display:flex;
+    flex-direction:column;
+    align-items:center;
+    gap:8px;
+    padding:0 24px calc(env(safe-area-inset-bottom) + 30px);
+    text-align:center;
+    pointer-events:none;
+  }
+
+  .hint{
+    font-size:14px;
+    font-weight:400;
+    line-height:1.4;
+    color:rgba(244,240,232,.64);
+    letter-spacing:.015em;
+    transition:color .5s ease;
+  }
+
+  .subhint{
+    min-height:16px;
+    font-size:11px;
+    line-height:1.5;
+    color:rgba(244,240,232,.31);
+    letter-spacing:.055em;
+    font-variant-numeric:tabular-nums;
+  }
+
+  body[data-state="recording"] .hint{color:rgba(255,148,124,.95)}
+  body[data-state="overdubbing"] .hint{color:rgba(244,196,116,.95)}
+  body[data-state="playing"] .hint{color:rgba(244,240,232,.7)}
+
+  @media (max-width:520px){
+    .topbar{padding:calc(env(safe-area-inset-top) + 18px) 16px 0}
+    .brand{gap:8px;font-size:9px;letter-spacing:.28em}
+    .tools{gap:1px}
+    .tool{width:32px;height:32px}
+    .tool svg{width:17px;height:17px}
+    .footer{gap:6px;padding:0 18px calc(env(safe-area-inset-bottom) + 24px)}
+    .hint{font-size:13px}
+    .subhint{font-size:10px}
+  }
+
+  @media (prefers-reduced-motion:reduce){
+    *,*::before,*::after{
+      transition-duration:.001ms !important;
+      animation-duration:.001ms !important;
+      animation-iteration-count:1 !important;
+    }
+  }
+</style>
+</head>
+<body data-state="idle">
+
+<canvas id="stage" aria-hidden="true"></canvas>
+
+<header class="topbar">
+  <div class="brand" aria-label="Ripple">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" aria-hidden="true">
+      <circle cx="12" cy="12" r="8.2" stroke="currentColor" stroke-width="1.1" opacity=".55"/>
+      <circle cx="12" cy="12" r="4.2" stroke="currentColor" stroke-width="1.1" opacity=".8"/>
+      <circle cx="12" cy="12" r="1.2" fill="currentColor"/>
+    </svg>
+    <span>Ripple</span>
+  </div>
+
+  <div class="tools" role="group" aria-label="工具">
+    <button class="tool" id="monitorBtn" type="button" aria-label="开启输入监听" aria-pressed="false" title="监听" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M4 14v-2a8 8 0 0 1 16 0v2"/>
+        <rect x="3" y="13" width="4" height="7" rx="2" fill="currentColor" stroke="none"/>
+        <rect x="17" y="13" width="4" height="7" rx="2" fill="currentColor" stroke="none"/>
+      </svg>
+    </button>
+
+    <button class="tool" id="undoBtn" type="button" aria-label="撤销最后一层" title="撤销" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M8.2 7H4v-4"/>
+        <path d="M4.7 7.3A8.2 8.2 0 1 1 4 15.2"/>
+      </svg>
+    </button>
+
+    <button class="tool" id="exportBtn" type="button" aria-label="导出 WAV" title="导出 WAV" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M12 4v11"/>
+        <path d="M8 11l4 4 4-4"/>
+        <path d="M5 19h14"/>
+      </svg>
+    </button>
+
+    <button class="tool" id="clearBtn" type="button" aria-label="清空现场" title="清空" disabled>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M5 7h14"/>
+        <path d="M9 7V5h6v2"/>
+        <path d="M8 7l.8 13h6.4L16 7"/>
+      </svg>
+    </button>
+  </div>
+</header>
+
+<button class="center-action" id="centerAction" type="button" aria-label="开始录制第一层"></button>
+
+<footer class="footer">
+  <div class="hint" id="hint">轻触开始</div>
+  <div class="subhint" id="subhint">建议戴耳机 · 录下第一层</div>
+</footer>
+
+<div class="sr-only" id="sr" aria-live="polite"></div>
+
+<script>
+(() => {
+  'use strict';
+
+  const MAX_LAYERS = 5;
+  const MAX_SECONDS = 30;
+  const MIN_FIRST = 0.6;
+  const MIN_OVERDUB = 0.12;
+  const COLORS = ['#f4b45e', '#ff6f5b', '#7ed6b3', '#7fb8ff', '#c9a7ff'];
+  const STATE_COLORS = {
+    recording: '#ff5a36',
+    overdubbing: '#f4b45e',
+    playing: '#7ed6b3',
+  };
+  const MONO = '"SF Mono","Cascadia Mono","Cascadia Code","Consolas",monospace';
+
+  const canvas = document.getElementById('stage');
+  const g = canvas.getContext('2d');
+  const ui = {
+    hint: document.getElementById('hint'),
+    subhint: document.getElementById('subhint'),
+    center: document.getElementById('centerAction'),
+    monitor: document.getElementById('monitorBtn'),
+    undo: document.getElementById('undoBtn'),
+    export: document.getElementById('exportBtn'),
+    clear: document.getElementById('clearBtn'),
+    sr: document.getElementById('sr'),
+  };
+
+  let W = 0;
+  let H = 0;
+  let cx = 0;
+  let cy = 0;
+  let centerR = 100;
+  let maxR = 360;
+  let firstR = 150;
+  let gap = 48;
+  let dpr = 1;
+
+  let ac = null;
+  let micStream = null;
+  let recorder = null;
+  let master = null;
+  let monitorGain = null;
+  let inputAnalyser = null;
+  let inputScratch = null;
+  let monitorOn = false;
+  let starting = false;
+  let audioError = null;
+
+  let mode = 'idle';
+  let layers = [];
+  let loopN = 0;
+  let loopLen = 0;
+  let epoch = 0;
+  let record = null;
+  let processing = false;
+
+  let inputLevel = 0;
+  let hover = -1;
+  let layerSeq = 0;
+  let flashState = null;
+  let flashTimer = 0;
+  let lastHint = '';
+  let lastSub = '';
+  let lastHintAt = 0;
+  let clearArmedUntil = 0;
+  let clearTimer = 0;
+  let lastActAt = 0;
+
+  const pathCache = new Map();
+  const reducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+  /* ---------------------------------------------------------------- */
+  /* Geometry                                                          */
+  /* ---------------------------------------------------------------- */
+
+  function resize() {
+    W = window.innerWidth;
+    H = window.innerHeight;
+    dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    canvas.width = Math.round(W * dpr);
+    canvas.height = Math.round(H * dpr);
+    canvas.style.width = W + 'px';
+    canvas.style.height = H + 'px';
+    g.setTransform(dpr, 0, 0, dpr, 0, 0);
+
+    cx = W / 2;
+    cy = H / 2;
+
+    const short = H < 620;
+    const topMargin = short ? 54 : 78;
+    const bottomMargin = short ? 64 : 96;
+    const availableH = Math.max(220, H - topMargin - bottomMargin);
+
+    maxR = Math.min(W / 2 - 26, availableH / 2);
+    centerR = Math.max(50, Math.min(112, Math.min(W, H) * 0.12));
+    firstR = centerR + Math.max(22, (maxR - centerR) * 0.2);
+    gap = (maxR - firstR) / Math.max(1, MAX_LAYERS - 1);
+
+    if (!Number.isFinite(gap) || gap < 8) {
+      gap = 8;
+      maxR = firstR + gap * (MAX_LAYERS - 1);
+    }
+
+    document.documentElement.style.setProperty('--center-size', centerR * 2 + 'px');
+    pathCache.clear();
+  }
+
+  function ringRadius(index) {
+    return firstR + gap * index;
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Helpers                                                           */
+  /* ---------------------------------------------------------------- */
+
+  function clamp(value, min, max) {
+    return Math.min(max, Math.max(min, value));
+  }
+
+  function rgba(hex, alpha) {
+    const value = hex.replace('#', '');
+    const r = parseInt(value.slice(0, 2), 16);
+    const green = parseInt(value.slice(2, 4), 16);
+    const b = parseInt(value.slice(4, 6), 16);
+    return `rgba(${r}, ${green}, ${b}, ${alpha})`;
+  }
+
+  function formatElapsed(seconds) {
+    const safe = Math.max(0, Math.min(MAX_SECONDS, seconds));
+    const whole = Math.floor(safe);
+    const tenth = Math.floor((safe - whole) * 10);
+    return `00:${String(whole).padStart(2, '0')}.${tenth}`;
+  }
+
+  function setText(element, text) {
+    if (element && element.textContent !== text) element.textContent = text;
+  }
+
+  function announce(text) {
+    ui.sr.textContent = text;
+  }
+
+  function phaseAt(time) {
+    if (!loopLen || !epoch) return 0;
+    return (((time - epoch) / loopLen) % 1 + 1) % 1;
+  }
+
+  function activeStateColor() {
+    return STATE_COLORS[mode] || '#f4f0e8';
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Hints                                                             */
+  /* ---------------------------------------------------------------- */
+
+  function setHint(main, sub) {
+    if (main !== lastHint) {
+      lastHint = main;
+      setText(ui.hint, main);
+    }
+    if (sub !== lastSub) {
+      lastSub = sub;
+      setText(ui.subhint, sub);
+    }
+  }
+
+  function flash(main, sub = '', duration = 1800) {
+    flashState = { main, sub, until: performance.now() + duration };
+    renderChrome();
+    clearTimeout(flashTimer);
+    flashTimer = setTimeout(() => {
+      flashState = null;
+      renderChrome();
+    }, duration + 40);
+  }
+
+  function clearFlash() {
+    flashState = null;
+    clearTimeout(flashTimer);
+    renderChrome();
+  }
+
+  function renderHint() {
+    if (flashState && performance.now() < flashState.until) {
+      setHint(flashState.main, flashState.sub);
+      return;
+    }
+
+    if (starting) {
+      setHint('正在连接麦克风…', '首次使用需要允许麦克风');
+      return;
+    }
+
+    if (audioError) {
+      setHint(audioError.main, audioError.sub);
+      return;
+    }
+
+    if (mode === 'recording' && record) {
+      const elapsed = ac ? Math.max(0, ac.currentTime - record.start) : 0;
+      setHint(
+        '轻触结束第一层',
+        `${formatElapsed(elapsed)} / 00:30 · 第一层决定循环长度`,
+      );
+      return;
+    }
+
+    if (mode === 'overdubbing' && record) {
+      const elapsed = ac ? Math.max(0, ac.currentTime - record.start) : 0;
+      setHint(
+        '轻触结束这一层',
+        `${formatElapsed(elapsed)} · 第 ${layers.length + 1} 层 / ${MAX_LAYERS}`,
+      );
+      return;
+    }
+
+    if (mode === 'processing') {
+      setHint('正在成型…', '把声音放进循环');
+      return;
+    }
+
+    if (mode === 'playing') {
+      if (layers.length >= MAX_LAYERS) {
+        setHint('五层已满', '点圆环静音 · 或撤销一层');
+      } else {
+        setHint(
+          '轻触叠加一层',
+          `点圆环静音 · 已录 ${layers.length} 层 / ${MAX_LAYERS}`,
+        );
+      }
+      return;
+    }
+
+    setHint('轻触开始', '建议戴耳机 · 录下第一层');
+  }
+
+  function renderChrome() {
+    document.body.dataset.state = mode;
+    const busy =
+      mode === 'recording' ||
+      mode === 'overdubbing' ||
+      mode === 'processing';
+
+    ui.center.disabled = starting || processing;
+    ui.monitor.disabled = !ac;
+    ui.monitor.setAttribute('aria-pressed', monitorOn ? 'true' : 'false');
+    ui.monitor.setAttribute(
+      'aria-label',
+      monitorOn ? '关闭输入监听' : '开启输入监听',
+    );
+
+    const canUseLayers = layers.length > 0 && !busy;
+    ui.undo.disabled = !canUseLayers;
+    ui.export.disabled = !canUseLayers || !loopN;
+    ui.clear.disabled = !canUseLayers;
+
+    const labels = {
+      idle: '开始录制第一层',
+      recording: '结束第一层',
+      overdubbing: '结束叠加',
+      playing: layers.length >= MAX_LAYERS ? '已满五层' : '叠加一层',
+      processing: '处理中',
+    };
+    ui.center.setAttribute('aria-label', labels[mode] || '录制');
+    renderHint();
+  }
+
+  function setMode(next) {
+    if (mode === next) {
+      renderChrome();
+      return;
+    }
+    mode = next;
+    renderChrome();
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Recorder                                                          */
+  /* ---------------------------------------------------------------- */
+
+  const WORKLET_SOURCE = `
+    class RippleRecorder extends AudioWorkletProcessor {
+      constructor() {
+        super();
+        this.capturing = false;
+        this.blockSize = 512;
+        this.block = new Float32Array(this.blockSize);
+        this.fill = 0;
+        this.blockStart = 0;
+        this.port.onmessage = (event) => {
+          const message = event.data;
+          if (message.type === 'start') {
+            this.capturing = true;
+            this.fill = 0;
+            this.blockStart = currentFrame;
+          } else if (message.type === 'stop') {
+            this.capturing = false;
+            this.flush();
+            this.port.postMessage({ type: 'stopped' });
+          }
+        };
+      }
+
+      flush() {
+        if (this.fill > 0) {
+          const data = this.block.slice(0, this.fill);
+          this.port.postMessage(
+            { type: 'chunk', frame: this.blockStart, data },
+            [data.buffer],
+          );
+          this.fill = 0;
+        }
+      }
+
+      process(inputs) {
+        if (!this.capturing) return true;
+        const input = inputs[0];
+        const channel = input && input[0] ? input[0] : null;
+        let offset = 0;
+
+        while (offset < 128) {
+          if (this.fill === 0) this.blockStart = currentFrame + offset;
+          const available = Math.min(128 - offset, this.blockSize - this.fill);
+          if (channel) {
+            this.block.set(channel.subarray(offset, offset + available), this.fill);
+          } else {
+            this.block.fill(0, this.fill, this.fill + available);
+          }
+          this.fill += available;
+          offset += available;
+
+          if (this.fill === this.blockSize) {
+            const data = this.block.slice(0);
+            this.port.postMessage(
+              { type: 'chunk', frame: this.blockStart, data },
+              [data.buffer],
+            );
+            this.fill = 0;
+          }
+        }
+        return true;
+      }
+    }
+
+    registerProcessor('ripple-recorder', RippleRecorder);
+  `;
+
+  class Recorder {
+    constructor(context, source) {
+      this.ac = context;
+      this.source = source;
+      this.mode = 'none';
+      this.node = null;
+      this.sink = null;
+      this.chunks = [];
+      this.capturing = false;
+      this.stopped = null;
+      this.resolveStopped = null;
+    }
+
+    async init() {
+      if (this.ac.audioWorklet) {
+        const blob = new Blob([WORKLET_SOURCE], { type: 'text/javascript' });
+        const url = URL.createObjectURL(blob);
+        try {
+          await this.ac.audioWorklet.addModule(url);
+          this.node = new AudioWorkletNode(this.ac, 'ripple-recorder', {
+            numberOfInputs: 1,
+            numberOfOutputs: 1,
+            outputChannelCount: [1],
+          });
+          this.node.port.onmessage = (event) => this.onMessage(event.data);
+          this.mode = 'worklet';
+        } catch (error) {
+          console.warn('[Ripple] AudioWorklet unavailable, using fallback.', error);
+        } finally {
+          URL.revokeObjectURL(url);
+        }
+      }
+
+      if (this.mode !== 'worklet') {
+        this.node = this.ac.createScriptProcessor(4096, 1, 1);
+        this.node.onaudioprocess = (event) => {
+          if (!this.capturing) return;
+          const source = event.inputBuffer.getChannelData(0);
+          const data = new Float32Array(source.length);
+          data.set(source);
+          const frame =
+            Math.round(this.ac.currentTime * this.ac.sampleRate) - data.length;
+          this.chunks.push({ frame: Math.max(0, frame), data });
+        };
+        this.mode = 'script';
+      }
+
+      this.sink = this.ac.createGain();
+      this.sink.gain.value = 0;
+      this.source.connect(this.node);
+      this.node.connect(this.sink);
+      this.sink.connect(this.ac.destination);
+    }
+
+    onMessage(message) {
+      if (message.type === 'chunk') {
+        this.chunks.push({ frame: message.frame, data: message.data });
+      } else if (message.type === 'stopped') {
+        if (this.resolveStopped) {
+          this.resolveStopped();
+          this.resolveStopped = null;
+        }
+      }
+    }
+
+    start() {
+      this.chunks = [];
+      this.capturing = true;
+      this.stopped = new Promise((resolve) => {
+        this.resolveStopped = resolve;
+      });
+      if (this.mode === 'worklet') {
+        this.node.port.postMessage({ type: 'start' });
+      }
+    }
+
+    async stop() {
+      if (!this.capturing) return;
+      this.capturing = false;
+      if (this.mode === 'worklet') {
+        this.node.port.postMessage({ type: 'stop' });
+        await Promise.race([
+          this.stopped || Promise.resolve(),
+          new Promise((resolve) => setTimeout(resolve, 600)),
+        ]);
+      }
+      this.stopped = null;
+      this.resolveStopped = null;
+    }
+
+    extract(startTime, endTime) {
+      const sampleRate = this.ac.sampleRate;
+      const startFrame = Math.round(startTime * sampleRate);
+      const endFrame = Math.round(endTime * sampleRate);
+      const length = Math.max(0, endFrame - startFrame);
+      const output = new Float32Array(length);
+
+      for (const chunk of this.chunks) {
+        const chunkStart = chunk.frame;
+        const chunkEnd = chunkStart + chunk.data.length;
+        const from = Math.max(chunkStart, startFrame);
+        const to = Math.min(chunkEnd, endFrame);
+        if (to > from) {
+          output.set(
+            chunk.data.subarray(from - chunkStart, to - chunkStart),
+            from - startFrame,
+          );
+        }
+      }
+      return output;
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Audio boot                                                        */
+  /* ---------------------------------------------------------------- */
+
+  function createMaster(context) {
+    const output = context.createGain();
+    output.gain.value = 0.8;
+
+    const compressor = context.createDynamicsCompressor();
+    compressor.threshold.value = -14;
+    compressor.knee.value = 22;
+    compressor.ratio.value = 4;
+    compressor.attack.value = 0.003;
+    compressor.release.value = 0.25;
+    output.connect(compressor);
+    compressor.connect(context.destination);
+    return output;
+  }
+
+  async function ensureAudio() {
+    if (ac) {
+      if (ac.state === 'suspended') {
+        try { await ac.resume(); } catch {}
+      }
+      return true;
+    }
+    if (starting) return false;
+
+    starting = true;
+    audioError = null;
+    renderChrome();
+
+    let context = null;
+    let stream = null;
+
+    try {
+      const AudioCtor = window.AudioContext || window.webkitAudioContext;
+      if (!AudioCtor) throw new Error('no-webaudio');
+      if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia) {
+        throw new Error('no-getusermedia');
+      }
+
+      // Ask for the device first. If there is no microphone, we should never
+      // create an AudioContext — that is what triggers Chrome's autoplay
+      // warning and wastes a context.
+      stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+          channelCount: 1,
+        },
+      });
+
+      context = new AudioCtor({ latencyHint: 'interactive' });
+      await context.resume();
+
+      ac = context;
+      micStream = stream;
+
+      master = createMaster(ac);
+
+      const micGain = ac.createGain();
+      micGain.gain.value = 0.84;
+
+      monitorGain = ac.createGain();
+      monitorGain.gain.value = 0;
+
+      const recordBus = ac.createGain();
+      const micSource = ac.createMediaStreamSource(stream);
+      micSource.connect(micGain);
+      micGain.connect(monitorGain);
+      monitorGain.connect(master);
+      micGain.connect(recordBus);
+
+      inputAnalyser = ac.createAnalyser();
+      inputAnalyser.fftSize = 512;
+      inputAnalyser.smoothingTimeConstant = 0.76;
+      inputScratch = new Float32Array(inputAnalyser.fftSize);
+      recordBus.connect(inputAnalyser);
+
+      const analyserSink = ac.createGain();
+      analyserSink.gain.value = 0;
+      inputAnalyser.connect(analyserSink);
+      analyserSink.connect(ac.destination);
+
+      recorder = new Recorder(ac, recordBus);
+      await recorder.init();
+
+      starting = false;
+      monitorOn = true;
+      monitorGain.gain.setValueAtTime(0, ac.currentTime);
+      monitorGain.gain.linearRampToValueAtTime(0.9, ac.currentTime + 0.15);
+      renderChrome();
+      announce('麦克风已连接。监听已开启，建议戴耳机。');
+      return true;
+    } catch (error) {
+      console.warn('[Ripple] boot failed', error);
+      starting = false;
+
+      if (stream) stream.getTracks().forEach((track) => track.stop());
+      if (context) {
+        try { await context.close(); } catch {}
+      }
+
+      ac = null;
+      micStream = null;
+      recorder = null;
+      master = null;
+      monitorGain = null;
+      inputAnalyser = null;
+      inputScratch = null;
+      monitorOn = false;
+
+      if (error && (error.name === 'NotAllowedError' || error.name === 'PermissionDeniedError')) {
+        audioError = {
+          main: '需要麦克风权限',
+          sub: '允许麦克风后重试',
+        };
+      } else if (error && (error.name === 'NotFoundError' || error.name === 'DevicesNotFoundError')) {
+        audioError = {
+          main: '没有找到麦克风',
+          sub: '连接输入设备后重试',
+        };
+      } else {
+        audioError = {
+          main: '麦克风没有启动',
+          sub: '检查权限后重试',
+        };
+      }
+
+      renderChrome();
+      announce(audioError.main);
+      return false;
+    }
+  }
+
+  function setMonitor(on) {
+    if (!ac || !monitorGain) return;
+    monitorOn = Boolean(on);
+    monitorGain.gain.setTargetAtTime(
+      monitorOn ? 0.92 : 0,
+      ac.currentTime,
+      0.02,
+    );
+    renderChrome();
+    announce(monitorOn ? '监听已开启' : '监听已关闭');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Layers                                                            */
+  /* ---------------------------------------------------------------- */
+
+  function fadeEdges(samples, sampleRate, milliseconds) {
+    const fade = Math.min(
+      Math.floor((sampleRate * milliseconds) / 1000),
+      Math.floor(samples.length / 2),
+    );
+    for (let i = 0; i < fade; i += 1) {
+      const gain = i / fade;
+      samples[i] *= gain;
+      samples[samples.length - 1 - i] *= gain;
+    }
+  }
+
+  function computePeaks(buffer, count = 260) {
+    const data = buffer.getChannelData(0);
+    const blockSize = Math.max(1, Math.floor(data.length / count));
+    const peaks = new Float32Array(count);
+    let global = 0;
+
+    for (let i = 0; i < count; i += 1) {
+      const start = i * blockSize;
+      const end = Math.min(data.length, start + blockSize);
+      let maximum = 0;
+      for (let j = start; j < end; j += 1) {
+        const value = Math.abs(data[j]);
+        if (value > maximum) maximum = value;
+      }
+      peaks[i] = maximum;
+      if (maximum > global) global = maximum;
+    }
+
+    if (global > 0.0001) {
+      const scale = 1 / global;
+      for (let i = 0; i < count; i += 1) peaks[i] *= scale;
+    }
+    return peaks;
+  }
+
+  function nextColor() {
+    const used = new Set(layers.map((layer) => layer.color));
+    return COLORS.find((color) => !used.has(color)) || COLORS[layers.length % COLORS.length];
+  }
+
+  function addLayer(buffer, at, offset) {
+    const gain = ac.createGain();
+    gain.gain.setValueAtTime(0.0001, at);
+    gain.gain.linearRampToValueAtTime(1, at + 0.025);
+    gain.connect(master);
+
+    const source = ac.createBufferSource();
+    source.buffer = buffer;
+    source.loop = true;
+    source.loopStart = 0;
+    source.loopEnd = buffer.duration;
+    source.connect(gain);
+    source.start(at, offset % buffer.duration);
+
+    const layer = {
+      id: ++layerSeq,
+      buffer,
+      gain,
+      source,
+      muted: false,
+      color: nextColor(),
+      peaks: computePeaks(buffer),
+    };
+    layers.push(layer);
+    return layer;
+  }
+
+  function startFirst() {
+    if (!ac || !recorder) return;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+
+    clearFlash();
+    record = { start: ac.currentTime, timer: 0 };
+    recorder.start();
+    setMode('recording');
+    announce('开始录制第一层');
+    record.timer = window.setTimeout(() => {
+      if (mode === 'recording') stopFirst(true);
+    }, MAX_SECONDS * 1000 + 80);
+  }
+
+  async function stopFirst(auto) {
+    if (mode !== 'recording' || !record) return;
+
+    const start = record.start;
+    const end = Math.min(ac.currentTime, start + MAX_SECONDS);
+    clearTimeout(record.timer);
+    record = null;
+    processing = true;
+    setMode('processing');
+
+    try {
+      await recorder.stop();
+    } catch {
+      processing = false;
+      setMode('idle');
+      flash('录音没有结束', '再试一次');
+      return;
+    }
+
+    const samples = recorder.extract(start, end);
+    const sampleRate = ac.sampleRate;
+    const duration = samples.length / sampleRate;
+
+    if (!samples.length || duration < MIN_FIRST) {
+      processing = false;
+      setMode('idle');
+      flash('再录长一点', '至少 0.6 秒，才能形成一个循环');
+      announce('录音太短，已取消');
+      return;
+    }
+
+    fadeEdges(samples, sampleRate, 5);
+
+    const buffer = ac.createBuffer(1, samples.length, sampleRate);
+    buffer.copyToChannel(samples, 0);
+
+    loopN = samples.length;
+    loopLen = buffer.duration;
+    const at = ac.currentTime + 0.07;
+    epoch = at;
+
+    addLayer(buffer, at, 0);
+    processing = false;
+    setMode('playing');
+    announce(`第一层完成。循环长度 ${duration.toFixed(1)} 秒。`);
+    if (auto) flash('第一层完成', '已经到 30 秒上限', 1400);
+  }
+
+  function startOverdub() {
+    if (!ac || !recorder || !loopLen) return;
+    if (layers.length >= MAX_LAYERS) {
+      flash('五层已满', '点圆环静音 · 或撤销一层');
+      return;
+    }
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+
+    clearFlash();
+    record = {
+      start: ac.currentTime,
+      phase: phaseAt(ac.currentTime),
+      timer: 0,
+    };
+    recorder.start();
+    setMode('overdubbing');
+    announce(`开始叠加第 ${layers.length + 1} 层`);
+    record.timer = window.setTimeout(() => {
+      if (mode === 'overdubbing') stopOverdub(true);
+    }, MAX_SECONDS * 1000 + 80);
+  }
+
+  async function stopOverdub(auto) {
+    if (mode !== 'overdubbing' || !record) return;
+
+    const start = record.start;
+    const phaseStart = record.phase;
+    const end = Math.min(ac.currentTime, start + MAX_SECONDS);
+    clearTimeout(record.timer);
+    record = null;
+    processing = true;
+    setMode('processing');
+
+    try {
+      await recorder.stop();
+    } catch {
+      processing = false;
+      setMode('playing');
+      flash('叠加没有结束', '再试一次');
+      return;
+    }
+
+    const samples = recorder.extract(start, end);
+    const sampleRate = ac.sampleRate;
+    const duration = samples.length / sampleRate;
+
+    if (!samples.length || duration < MIN_OVERDUB) {
+      processing = false;
+      setMode('playing');
+      flash('这一层太短了', '至少 0.12 秒');
+      return;
+    }
+
+    fadeEdges(samples, sampleRate, 4);
+
+    const buffer = ac.createBuffer(1, loopN, sampleRate);
+    const data = buffer.getChannelData(0);
+    let index = Math.floor(phaseStart * loopN);
+
+    for (let i = 0; i < samples.length; i += 1) {
+      data[index] = Math.tanh(data[index] + samples[i]);
+      index += 1;
+      if (index >= loopN) index = 0;
+    }
+
+    const at = ac.currentTime + 0.06;
+    addLayer(buffer, at, phaseAt(at));
+    processing = false;
+    setMode('playing');
+    announce(`第 ${layers.length} 层已加入。`);
+    if (auto) flash('这一层完成', '已经到 30 秒上限', 1400);
+  }
+
+  function toggleMute(index) {
+    const layer = layers[index];
+    if (!layer || !ac) return;
+    layer.muted = !layer.muted;
+    layer.gain.gain.setTargetAtTime(
+      layer.muted ? 0 : 1,
+      ac.currentTime,
+      0.03,
+    );
+    announce(
+      layer.muted
+        ? `第 ${index + 1} 层已静音`
+        : `第 ${index + 1} 层已恢复`,
+    );
+  }
+
+  function undoLayer() {
+    if (mode !== 'playing' || !layers.length) return;
+
+    const layer = layers.pop();
+    pathCache.delete(layer.id);
+    layer.gain.gain.setTargetAtTime(0, ac.currentTime, 0.025);
+    window.setTimeout(() => {
+      try {
+        layer.source.stop();
+        layer.source.disconnect();
+      } catch {}
+    }, 80);
+
+    if (!layers.length) {
+      resetLoop();
+      setMode('idle');
+    } else {
+      renderChrome();
+    }
+    flash('已撤销一层', layers.length ? `还剩 ${layers.length} 层` : '', 1200);
+    announce('已撤销最后一层');
+  }
+
+  function resetLoop() {
+    loopN = 0;
+    loopLen = 0;
+    epoch = 0;
+    pathCache.clear();
+  }
+
+  function clearAll() {
+    if (!layers.length) return;
+    layers.forEach((layer) => {
+      layer.gain.gain.setTargetAtTime(0, ac.currentTime, 0.025);
+      window.setTimeout(() => {
+        try {
+          layer.source.stop();
+          layer.source.disconnect();
+        } catch {}
+      }, 80);
+    });
+    layers = [];
+    inputLevel = 0;
+    resetLoop();
+    setMode('idle');
+    flash('已清空', '可以重新开始', 1400);
+    announce('现场已清空');
+    clearArmedUntil = 0;
+    clearTimeout(clearTimer);
+    ui.clear.classList.remove('is-confirming');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Central action                                                    */
+  /* ---------------------------------------------------------------- */
+
+  async function act() {
+    if (processing || starting) return;
+
+    const now = performance.now();
+    if (now - lastActAt < 120) return;
+    lastActAt = now;
+
+    if (!ac) {
+      const ok = await ensureAudio();
+      if (!ok) return;
+      if (ac.state !== 'running') {
+        try { await ac.resume(); } catch {}
+      }
+      if (ac.state !== 'running') {
+        flash('轻触继续', '浏览器需要一次点击来启用音频', 1800);
+        return;
+      }
+      startFirst();
+      return;
+    }
+
+    if (ac.state !== 'running') {
+      try { await ac.resume(); } catch {}
+      if (ac.state !== 'running') {
+        flash('轻触继续', '浏览器需要一次点击来启用音频', 1800);
+        return;
+      }
+    }
+
+    if (mode === 'idle') {
+      startFirst();
+    } else if (mode === 'recording') {
+      stopFirst(false);
+    } else if (mode === 'overdubbing') {
+      stopOverdub(false);
+    } else if (mode === 'playing') {
+      startOverdub();
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Tools                                                             */
+  /* ---------------------------------------------------------------- */
+
+  function handleClear() {
+    if (mode !== 'playing' || !layers.length) return;
+
+    if (performance.now() < clearArmedUntil) {
+      clearArmedUntil = 0;
+      ui.clear.classList.remove('is-confirming');
+      clearAll();
+      return;
+    }
+
+    clearArmedUntil = performance.now() + 2600;
+    ui.clear.classList.add('is-confirming');
+    flash('再点一次清空', '所有层都会被移除', 2400);
+    clearTimeout(clearTimer);
+    clearTimer = window.setTimeout(() => {
+      clearArmedUntil = 0;
+      ui.clear.classList.remove('is-confirming');
+    }, 2600);
+  }
+
+  function handleUndo() {
+    if (mode !== 'playing' || !layers.length) return;
+    undoLayer();
+  }
+
+  function handleMonitor() {
+    if (!ac) return;
+    setMonitor(!monitorOn);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* WAV export                                                        */
+  /* ---------------------------------------------------------------- */
+
+  function encodeWav(channels, sampleRate) {
+    const channelCount = channels.length;
+    const frames = channels[0].length;
+    const blockAlign = channelCount * 2;
+    const dataSize = frames * blockAlign;
+    const buffer = new ArrayBuffer(44 + dataSize);
+    const view = new DataView(buffer);
+
+    const writeAscii = (offset, text) => {
+      for (let i = 0; i < text.length; i += 1) {
+        view.setUint8(offset + i, text.charCodeAt(i));
+      }
+    };
+
+    writeAscii(0, 'RIFF');
+    view.setUint32(4, 36 + dataSize, true);
+    writeAscii(8, 'WAVE');
+    writeAscii(12, 'fmt ');
+    view.setUint32(16, 16, true);
+    view.setUint16(20, 1, true);
+    view.setUint16(22, channelCount, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, sampleRate * blockAlign, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, 16, true);
+    writeAscii(36, 'data');
+    view.setUint32(40, dataSize, true);
+
+    let offset = 44;
+    for (let frame = 0; frame < frames; frame += 1) {
+      for (let channel = 0; channel < channelCount; channel += 1) {
+        const sample = Math.max(-1, Math.min(1, channels[channel][frame]));
+        view.setInt16(
+          offset,
+          sample < 0 ? sample * 0x8000 : sample * 0x7fff,
+          true,
+        );
+        offset += 2;
+      }
+    }
+    return buffer;
+  }
+
+  async function exportMix() {
+    if (!layers.length || !loopN || !ac) return null;
+    if (mode === 'recording' || mode === 'overdubbing' || mode === 'processing') {
+      return null;
+    }
+
+    flash('正在导出…', '离线混音', 1000);
+    ui.export.disabled = true;
+
+    try {
+      const sampleRate = ac.sampleRate;
+      const offline = new OfflineAudioContext(2, loopN, sampleRate);
+      const masterOut = offline.createGain();
+      masterOut.gain.value = 0.8;
+
+      const compressor = offline.createDynamicsCompressor();
+      compressor.threshold.value = -14;
+      compressor.knee.value = 22;
+      compressor.ratio.value = 4;
+      compressor.attack.value = 0.003;
+      compressor.release.value = 0.25;
+      masterOut.connect(compressor);
+      compressor.connect(offline.destination);
+
+      layers.forEach((layer) => {
+        if (layer.muted) return;
+        const source = offline.createBufferSource();
+        source.buffer = layer.buffer;
+        const gain = offline.createGain();
+        gain.gain.value = 1;
+        source.connect(gain);
+        gain.connect(masterOut);
+        source.start(0);
+      });
+
+      const rendered = await offline.startRendering();
+      const left = rendered.getChannelData(0).slice();
+      const right = rendered.getChannelData(1).slice();
+
+      let maximum = 0;
+      for (let i = 0; i < left.length; i += 1) {
+        maximum = Math.max(maximum, Math.abs(left[i]));
+      }
+      for (let i = 0; i < right.length; i += 1) {
+        maximum = Math.max(maximum, Math.abs(right[i]));
+      }
+      if (maximum > 0.98) {
+        const scale = 0.98 / maximum;
+        for (let i = 0; i < left.length; i += 1) left[i] *= scale;
+        for (let i = 0; i < right.length; i += 1) right[i] *= scale;
+      }
+
+      const wav = encodeWav([left, right], sampleRate);
+      const blob = new Blob([wav], { type: 'audio/wav' });
+      const url = URL.createObjectURL(blob);
+      const anchor = document.createElement('a');
+      const stamp = new Date()
+        .toISOString()
+        .replace(/[:T]/g, '-')
+        .slice(0, 16);
+      const filename = `Ripple-${stamp}.wav`;
+      anchor.href = url;
+      anchor.download = filename;
+      document.body.appendChild(anchor);
+      anchor.click();
+      anchor.remove();
+      window.setTimeout(() => URL.revokeObjectURL(url), 2000);
+
+      flash('已导出 WAV', '混音保存在下载文件夹', 2400);
+      return { arrayBuffer: wav, filename };
+    } catch (error) {
+      console.warn('[Ripple] export failed', error);
+      flash('导出失败', '再试一次');
+      return null;
+    } finally {
+      renderChrome();
+    }
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Drawing                                                           */
+  /* ---------------------------------------------------------------- */
+
+  function sampleInput() {
+    if (!inputAnalyser || !inputScratch) {
+      inputLevel += (0 - inputLevel) * 0.1;
+      return;
+    }
+    inputAnalyser.getFloatTimeDomainData(inputScratch);
+    let sum = 0;
+    for (let i = 0; i < inputScratch.length; i += 1) {
+      sum += inputScratch[i] * inputScratch[i];
+    }
+    const rms = Math.sqrt(sum / inputScratch.length);
+    const target = Math.min(1, rms * 8);
+    inputLevel += (target - inputLevel) * 0.18;
+  }
+
+  function waveformPath(layer, radius) {
+    const cached = pathCache.get(layer.id);
+    if (
+      cached &&
+      cached.buffer === layer.buffer &&
+      cached.radius === radius &&
+      cached.width === W
+    ) {
+      return cached.path;
+    }
+
+    const peaks = layer.peaks;
+    const count = peaks.length;
+    const path = new Path2D();
+    const spread = Math.max(5, Math.min(11, gap * 0.2));
+
+    for (let i = 0; i < count; i += 1) {
+      const previous = peaks[(i - 1 + count) % count];
+      const current = peaks[i];
+      const next = peaks[(i + 1) % count];
+      const amplitude = ((previous + current * 2 + next) / 4) ** 0.9;
+      const angle = -Math.PI / 2 + (i / count) * Math.PI * 2;
+      const edge = radius + 1.5 + amplitude * spread;
+      const x = cx + Math.cos(angle) * edge;
+      const y = cy + Math.sin(angle) * edge;
+      if (i === 0) path.moveTo(x, y);
+      else path.lineTo(x, y);
+    }
+
+    for (let i = count - 1; i >= 0; i -= 1) {
+      const previous = peaks[(i - 1 + count) % count];
+      const current = peaks[i];
+      const next = peaks[(i + 1) % count];
+      const amplitude = ((previous + current * 2 + next) / 4) ** 0.9;
+      const angle = -Math.PI / 2 + (i / count) * Math.PI * 2;
+      const edge = radius - 1.5 - amplitude * spread;
+      path.lineTo(cx + Math.cos(angle) * edge, cy + Math.sin(angle) * edge);
+    }
+
+    path.closePath();
+    pathCache.set(layer.id, {
+      buffer: layer.buffer,
+      radius,
+      width: W,
+      path,
+    });
+    return path;
+  }
+
+  function drawBaseRing(radius, alpha) {
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, radius, 0, Math.PI * 2);
+    g.strokeStyle = `rgba(244,240,232,${alpha})`;
+    g.lineWidth = 1;
+    g.stroke();
+    g.restore();
+  }
+
+  function drawLayer(layer, index, phase) {
+    const radius = ringRadius(index);
+    const color = layer.color;
+    const muted = layer.muted;
+    const path = waveformPath(layer, radius);
+
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, radius, 0, Math.PI * 2);
+    g.strokeStyle = rgba(color, muted ? 0.075 : 0.34);
+    g.lineWidth = 1;
+    g.stroke();
+
+    if (!muted) {
+      g.strokeStyle = rgba(color, 0.085);
+      g.lineWidth = 6;
+      g.stroke(path);
+    }
+
+    if (!muted) {
+      g.fillStyle = rgba(color, 0.26);
+    } else {
+      g.fillStyle = rgba(color, 0.03);
+    }
+    g.fill(path);
+    g.strokeStyle = rgba(color, muted ? 0.1 : 0.72);
+    g.lineWidth = 0.9;
+    g.stroke(path);
+
+    const startAngle = -Math.PI / 2;
+    g.beginPath();
+    g.moveTo(
+      cx + Math.cos(startAngle) * (radius - 4),
+      cy + Math.sin(startAngle) * (radius - 4),
+    );
+    g.lineTo(
+      cx + Math.cos(startAngle) * (radius + 4),
+      cy + Math.sin(startAngle) * (radius + 4),
+    );
+    g.strokeStyle = rgba(color, muted ? 0.1 : 0.34);
+    g.lineWidth = 1;
+    g.stroke();
+
+    if (!muted) {
+      const angle = startAngle + phase * Math.PI * 2;
+      const px = cx + Math.cos(angle) * radius;
+      const py = cy + Math.sin(angle) * radius;
+      const level = inputLevel;
+      g.save();
+      g.shadowColor = rgba(color, 0.85);
+      g.shadowBlur = 12 + level * 16;
+      g.fillStyle = rgba(color, 0.98);
+      g.beginPath();
+      g.arc(px, py, 2.5 + level * 2, 0, Math.PI * 2);
+      g.fill();
+      g.restore();
+    }
+
+    if (hover === index) {
+      g.beginPath();
+      g.arc(cx, cy, radius + 8, 0, Math.PI * 2);
+      g.strokeStyle = rgba(color, 0.2);
+      g.lineWidth = 1;
+      g.stroke();
+    }
+
+    g.restore();
+  }
+
+  function drawGhost(phase) {
+    if (mode !== 'recording' && mode !== 'overdubbing') return;
+    const index = mode === 'recording' ? 0 : layers.length;
+    if (index >= MAX_LAYERS) return;
+
+    const radius = ringRadius(index);
+    const color =
+      mode === 'recording' ? STATE_COLORS.recording : STATE_COLORS.overdubbing;
+
+    g.save();
+    g.beginPath();
+    g.arc(cx, cy, radius, 0, Math.PI * 2);
+    g.strokeStyle = rgba(color, 0.3);
+    g.lineWidth = 1;
+    g.setLineDash([2, 8]);
+    g.stroke();
+    g.restore();
+
+    if (mode === 'overdubbing' && record && loopLen) {
+      const elapsed = Math.max(0, ac.currentTime - record.start);
+      const phaseTravel = Math.min(1.4, elapsed / loopLen);
+      const startAngle = -Math.PI / 2 + record.phase * Math.PI * 2;
+      const endAngle = startAngle + phaseTravel * Math.PI * 2;
+      g.beginPath();
+      g.arc(cx, cy, radius, startAngle, endAngle);
+      g.strokeStyle = rgba(color, 0.7);
+      g.lineWidth = 2;
+      g.lineCap = 'round';
+      g.stroke();
+    }
+
+    if (mode === 'recording' && record) {
+      const progress = Math.min(
+        1,
+        Math.max(0, (ac.currentTime - record.start) / MAX_SECONDS),
+      );
+      const startAngle = -Math.PI / 2;
+      const endAngle = startAngle + Math.max(0.004, progress) * Math.PI * 2;
+      g.beginPath();
+      g.arc(cx, cy, radius, startAngle, endAngle);
+      g.strokeStyle = rgba(color, 0.82);
+      g.lineWidth = 2.4;
+      g.lineCap = 'round';
+      g.shadowColor = rgba(color, 0.75);
+      g.shadowBlur = 14;
+      g.stroke();
+      g.shadowBlur = 0;
+    }
+
+    const angle = -Math.PI / 2 + phase * Math.PI * 2;
+    const px = cx + Math.cos(angle) * radius;
+    const py = cy + Math.sin(angle) * radius;
+    g.save();
+    g.shadowColor = rgba(color, 0.85);
+    g.shadowBlur = 14;
+    g.fillStyle = rgba(color, 0.98);
+    g.beginPath();
+    g.arc(px, py, 2.6, 0, Math.PI * 2);
+    g.fill();
+    g.restore();
+  }
+
+  function drawCenter(now) {
+    const color = activeStateColor();
+    const recording = mode === 'recording';
+    const overdubbing = mode === 'overdubbing';
+    const playing = mode === 'playing';
+
+    const glowStrength = 0.045 + inputLevel * 0.12;
+    const glow = g.createRadialGradient(
+      cx,
+      cy,
+      centerR * 0.2,
+      cx,
+      cy,
+      centerR * 2.05,
+    );
+    glow.addColorStop(0, rgba(color, glowStrength + 0.03));
+    glow.addColorStop(0.45, rgba(color, glowStrength * 0.45));
+    glow.addColorStop(1, rgba(color, 0));
+    g.fillStyle = glow;
+    g.beginPath();
+    g.arc(cx, cy, centerR * 2.05, 0, Math.PI * 2);
+    g.fill();
+
+    g.save();
+    if (recording || overdubbing) {
+      g.shadowColor = rgba(color, 0.55);
+      g.shadowBlur = 46 + inputLevel * 30;
+      g.beginPath();
+      g.arc(cx, cy, centerR, 0, Math.PI * 2);
+      g.fillStyle = color;
+      g.fill();
+    } else if (playing) {
+      g.shadowColor = rgba(color, 0.32);
+      g.shadowBlur = 28;
+      g.beginPath();
+      g.arc(cx, cy, centerR, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(126,214,179,.07)';
+      g.fill();
+    } else {
+      const breathe = reducedMotion ? 0.5 : 0.5 + 0.5 * Math.sin(now / 1800);
+      g.beginPath();
+      g.arc(cx, cy, centerR, 0, Math.PI * 2);
+      g.fillStyle = `rgba(244,240,232,${0.034 + breathe * 0.012})`;
+      g.fill();
+      g.beginPath();
+      g.arc(cx, cy, centerR + 1, 0, Math.PI * 2);
+      g.strokeStyle = `rgba(244,240,232,${0.12 + breathe * 0.035})`;
+      g.lineWidth = 1;
+      g.stroke();
+    }
+    g.restore();
+
+    g.beginPath();
+    g.arc(cx, cy, centerR, 0, Math.PI * 2);
+    g.strokeStyle =
+      recording || overdubbing
+        ? 'rgba(255,255,255,.22)'
+        : playing
+          ? 'rgba(126,214,179,.68)'
+          : 'rgba(244,240,232,.16)';
+    g.lineWidth = 1.1;
+    g.stroke();
+
+    g.beginPath();
+    g.arc(cx, cy, centerR - 5, 0, Math.PI * 2);
+    g.strokeStyle = `rgba(255,255,255,${0.018 + inputLevel * 0.1})`;
+    g.lineWidth = 1.2;
+    g.stroke();
+
+    g.textAlign = 'center';
+    g.textBaseline = 'middle';
+
+    if (recording) {
+      const size = clamp(centerR * 0.18, 11, 19);
+      g.fillStyle = 'rgba(255,255,255,.95)';
+      g.fillRect(cx - size / 2, cy - size / 2 - 8, size, size);
+      g.font = '600 8px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(255,255,255,.72)';
+      g.fillText('REC', cx, cy + size / 2 + 10);
+      g.font = `400 8px ${MONO}`;
+      g.fillStyle = 'rgba(255,255,255,.42)';
+      g.fillText(
+        formatElapsed(Math.max(0, ac.currentTime - record.start)),
+        cx,
+        cy + size / 2 + 25,
+      );
+    } else if (overdubbing) {
+      const size = clamp(centerR * 0.15, 9, 16);
+      g.fillStyle = 'rgba(255,255,255,.95)';
+      g.fillRect(cx - size / 2, cy - size / 2 - 7, size, size);
+      g.font = '600 8px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(255,255,255,.74)';
+      g.fillText('OVERDUB', cx, cy + size / 2 + 10);
+      g.font = '400 8px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(255,255,255,.42)';
+      g.fillText(`LAYER ${layers.length + 1}`, cx, cy + size / 2 + 25);
+    } else if (playing) {
+      g.font = `200 ${Math.round(centerR * 0.62)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
+      g.fillStyle = 'rgba(244,240,232,.96)';
+      g.fillText(String(layers.length), cx, cy - centerR * 0.03);
+      g.font = '600 7px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(244,240,232,.4)';
+      g.fillText(
+        layers.length >= MAX_LAYERS ? 'FULL' : 'LAYERS',
+        cx,
+        cy + centerR * 0.3,
+      );
+    } else if (mode === 'processing') {
+      const pulse = reducedMotion ? 0.6 : 0.35 + 0.35 * Math.sin(now / 220);
+      for (let i = -1; i <= 1; i += 1) {
+        g.beginPath();
+        g.arc(cx + i * 9, cy, 2, 0, Math.PI * 2);
+        g.fillStyle = `rgba(244,240,232,${pulse})`;
+        g.fill();
+      }
+    } else {
+      g.beginPath();
+      g.arc(cx, cy, 5, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(244,240,232,.58)';
+      g.fill();
+      g.beginPath();
+      g.arc(cx, cy, 10, 0, Math.PI * 2);
+      g.strokeStyle = 'rgba(244,240,232,.12)';
+      g.lineWidth = 1;
+      g.stroke();
+    }
+
+    if (hover === -2) {
+      g.beginPath();
+      g.arc(cx, cy, centerR + 10, 0, Math.PI * 2);
+      g.strokeStyle = 'rgba(244,240,232,.18)';
+      g.lineWidth = 1;
+      g.stroke();
+    }
+  }
+
+  function draw(now) {
+    if (document.hidden) {
+      requestAnimationFrame(draw);
+      return;
+    }
+
+    sampleInput();
+
+    const phase = ac ? phaseAt(ac.currentTime) : 0;
+    const stateColor = activeStateColor();
+
+    g.clearRect(0, 0, W, H);
+
+    const ambient = g.createRadialGradient(
+      cx,
+      cy,
+      centerR * 0.2,
+      cx,
+      cy,
+      Math.max(centerR * 2.4, maxR * 1.18),
+    );
+    ambient.addColorStop(0, rgba(stateColor, mode === 'idle' ? 0.025 : 0.055));
+    ambient.addColorStop(0.5, rgba(stateColor, mode === 'idle' ? 0.01 : 0.022));
+    ambient.addColorStop(1, rgba(stateColor, 0));
+    g.fillStyle = ambient;
+    g.beginPath();
+    g.arc(cx, cy, Math.max(centerR * 2.4, maxR * 1.18), 0, Math.PI * 2);
+    g.fill();
+
+    for (let i = 0; i < MAX_LAYERS; i += 1) {
+      const layer = layers[i];
+      if (layer) {
+        drawLayer(layer, i, phase);
+      } else if (
+        !(mode === 'recording' && i === 0) &&
+        !(mode === 'overdubbing' && i === layers.length)
+      ) {
+        drawBaseRing(ringRadius(i), 0.078);
+      }
+    }
+
+    drawGhost(phase);
+    drawCenter(now);
+
+    if (performance.now() - lastHintAt > 100) {
+      lastHintAt = performance.now();
+      renderHint();
+    }
+
+    requestAnimationFrame(draw);
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Pointer + keyboard                                                */
+  /* ---------------------------------------------------------------- */
+
+  function hitTest(x, y) {
+    const distance = Math.hypot(x - cx, y - cy);
+    if (distance <= centerR + 10) return { type: 'center' };
+
+    for (let i = layers.length - 1; i >= 0; i -= 1) {
+      if (Math.abs(distance - ringRadius(i)) <= Math.max(10, gap * 0.36)) {
+        return { type: 'layer', index: i };
+      }
+    }
+    return null;
+  }
+
+  canvas.addEventListener('pointermove', (event) => {
+    if (event.pointerType !== 'mouse') return;
+    const rect = canvas.getBoundingClientRect();
+    const hit = hitTest(event.clientX - rect.left, event.clientY - rect.top);
+    if (hit && hit.type === 'layer') {
+      hover = hit.index;
+      canvas.style.cursor = 'pointer';
+    } else if (hit && hit.type === 'center') {
+      hover = -2;
+      canvas.style.cursor = 'pointer';
+    } else {
+      hover = -1;
+      canvas.style.cursor = 'default';
+    }
+  });
+
+  canvas.addEventListener('pointerleave', () => {
+    hover = -1;
+    canvas.style.cursor = 'default';
+  });
+
+  canvas.addEventListener('pointerdown', (event) => {
+    const rect = canvas.getBoundingClientRect();
+    const hit = hitTest(event.clientX - rect.left, event.clientY - rect.top);
+    if (!hit) return;
+    event.preventDefault();
+
+    if (hit.type === 'layer') {
+      toggleMute(hit.index);
+    } else if (hit.type === 'center') {
+      act();
+    }
+  });
+
+  ui.center.addEventListener('pointerdown', (event) => {
+    event.preventDefault();
+    act();
+  });
+
+  ui.center.addEventListener('keydown', (event) => {
+    if (event.code === 'Space' || event.code === 'Enter') {
+      event.preventDefault();
+      event.stopPropagation();
+      act();
+    }
+  });
+
+  ui.center.addEventListener('click', (event) => {
+    if (event.detail === 0) act();
+  });
+
+  ui.monitor.addEventListener('click', handleMonitor);
+  ui.undo.addEventListener('click', handleUndo);
+  ui.export.addEventListener('click', exportMix);
+  ui.clear.addEventListener('click', handleClear);
+
+  window.addEventListener('keydown', (event) => {
+    if (event.repeat) return;
+    const target = event.target;
+    const inButton = target instanceof Element && target.closest('button');
+
+    if (!inButton && (event.code === 'Space' || event.code === 'Enter')) {
+      event.preventDefault();
+      act();
+      return;
+    }
+
+    if (event.metaKey || event.ctrlKey || event.altKey) return;
+    const key = event.key.toLowerCase();
+
+    if (key === 'u') {
+      event.preventDefault();
+      handleUndo();
+    } else if (key === 'e') {
+      event.preventDefault();
+      exportMix();
+    } else if (/^[1-5]$/.test(key)) {
+      event.preventDefault();
+      toggleMute(Number(key) - 1);
+    }
+  });
+
+  window.addEventListener('resize', resize);
+  window.addEventListener('orientationchange', () => {
+    window.setTimeout(resize, 120);
+  });
+
+  /* ---------------------------------------------------------------- */
+  /* Boot                                                              */
+  /* ---------------------------------------------------------------- */
+
+  if ('serviceWorker' in navigator) {
+    navigator.serviceWorker
+      .getRegistrations?.()
+      .then((registrations) => {
+        registrations.forEach((registration) => registration.unregister());
+      })
+      .catch(() => {});
+  }
+
+  window.__RIPPLE__ = {
+    get mode() {
+      return mode;
+    },    get layers() {
+      return layers.length;
+    },
+    get loopLen() {
+      return loopLen;
+    },
+    get state() {
+      return {
+        mode,
+        layers: layers.length,
+        loopLen,
+        muted: layers.map((layer) => layer.muted),
+        monitorOn,
+        audioState: ac ? ac.state : null,
+        audioError: audioError ? audioError.main : null,
+      };
+    },
+    mute: toggleMute,
+    undo: undoLayer,
+    clear: clearAll,
+    exportWav: exportMix,
+  };
+
+  resize();
+  renderChrome();
+  requestAnimationFrame(draw);
+})();
+</script>
+</body>
+</html>
