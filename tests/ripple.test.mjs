@@ -14,7 +14,9 @@ test('Ripple is a single-file loop instrument', () => {
   assert.match(html, /id="resetBtn"/);
   assert.doesNotMatch(html, /id="undoBtn"/);
   assert.match(html, /LONG_PRESS_MS = 520/);
-  assert.match(html, /startRerecord/);
+  assert.match(html, /DELETE_ARM_MS = 5000/);
+  assert.match(html, /function armDelete/);
+  assert.doesNotMatch(html, /startRerecord/);
   assert.match(html, /encodeWav/);
 });
 
