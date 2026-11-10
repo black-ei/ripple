@@ -122,6 +122,18 @@
 
   .tool svg{display:block;width:18px;height:18px}
 
+  .tool--pill{
+    width:auto;
+    min-width:46px;
+    padding:0 10px;
+    border-color:rgba(244,240,232,.1);
+    border-radius:999px;
+    background:rgba(244,240,232,.025);
+    font:600 10px/1 var(--mono);
+    letter-spacing:.03em;
+    font-variant-numeric:tabular-nums;
+  }
+
   .tool:hover{
     color:rgba(244,240,232,.94);
     background:rgba(244,240,232,.06);
@@ -195,6 +207,7 @@
     font-variant-numeric:tabular-nums;
   }
 
+  body[data-state="counting"] .hint{color:rgba(244,240,232,.82)}
   body[data-state="recording"] .hint{color:rgba(255,148,124,.95)}
   body[data-state="overdubbing"] .hint{color:rgba(244,196,116,.95)}
   body[data-state="playing"] .hint{color:rgba(244,240,232,.7)}
@@ -206,6 +219,7 @@
     .tools{gap:1px}
     .tool{width:32px;height:32px}
     .tool svg{width:17px;height:17px}
+    .tool--pill{width:auto;min-width:42px;padding:0 8px;font-size:9px}
     .footer{gap:6px;padding:0 18px calc(env(safe-area-inset-bottom) + 24px)}
     .hint{font-size:13px}
     .subhint{font-size:10px}
@@ -235,6 +249,9 @@
   </div>
 
   <div class="tools" role="group" aria-label="工具">
+    <button class="tool tool--pill" id="meterBtn" type="button" aria-label="拍号 四四拍，轻触切换" title="拍号">4/4</button>
+    <button class="tool tool--pill" id="tempoBtn" type="button" aria-label="节拍 120 BPM，轻触切换" title="节拍">120</button>
+
     <button class="tool" id="monitorBtn" type="button" aria-label="开启输入监听" aria-pressed="false" title="监听" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
         <path d="M4 14v-2a8 8 0 0 1 16 0v2"/>
@@ -277,8 +294,17 @@
   const MAX_SECONDS = 30;
   const MIN_FIRST = 0.6;
   const MIN_OVERDUB = 0.12;
+  const BPM_PRESETS = [80, 100, 120, 140];
+  const METERS = [
+    { label: '4/4', name: '四四拍', beats: 4, accents: [0] },
+    { label: '3/4', name: '三四拍', beats: 3, accents: [0] },
+    { label: '6/8', name: '六八拍', beats: 6, accents: [0, 3] },
+  ];
+  const COUNT_IN_BARS = 1;
+  const CLICK_LEAD = 0.12;
   const COLORS = ['#f4b45e', '#ff6f5b', '#7ed6b3', '#7fb8ff', '#c9a7ff'];
   const STATE_COLORS = {
+    counting: '#f4f0e8',
     recording: '#ff5a36',
     overdubbing: '#f4b45e',
     playing: '#7ed6b3',
@@ -291,6 +317,8 @@
     hint: document.getElementById('hint'),
     subhint: document.getElementById('subhint'),
     center: document.getElementById('centerAction'),
+    meter: document.getElementById('meterBtn'),
+    tempo: document.getElementById('tempoBtn'),
     monitor: document.getElementById('monitorBtn'),
     export: document.getElementById('exportBtn'),
     reset: document.getElementById('resetBtn'),
@@ -317,6 +345,9 @@
   let monitorOn = false;
   let starting = false;
   let audioError = null;
+  let bpm = 120;
+  let meterIndex = 0;
+  let clickBus = null;
 
   let mode = 'idle';
   let layers = [];
@@ -324,6 +355,8 @@
   let loopLen = 0;
   let epoch = 0;
   let record = null;
+  let countIn = null;
+  let metronome = null;
   let processing = false;
   let pendingDelete = null;
   let longPress = null;
@@ -480,6 +513,17 @@
       return;
     }
 
+    if (mode === 'counting' && countIn) {
+      const meter = METERS[meterIndex];
+      setHint(
+        countIn.target === 'first'
+          ? '准备第一层'
+          : `准备叠加第 ${layers.length + 1} 层`,
+        `${countIn.beats} 拍倒数 · ${bpm} BPM · ${meter.label} · 轻触取消`,
+      );
+      return;
+    }
+
     if (mode === 'recording' && record) {
       const elapsed = ac ? Math.max(0, ac.currentTime - record.start) : 0;
       setHint(
@@ -522,12 +566,22 @@
     document.body.dataset.state = mode;
     document.body.dataset.deleting = pendingDelete ? 'true' : 'false';
     const busy =
+      mode === 'counting' ||
       mode === 'recording' ||
       mode === 'overdubbing' ||
       mode === 'processing' ||
       Boolean(pendingDelete);
 
     ui.center.disabled = starting || processing;
+    ui.meter.textContent = METERS[meterIndex].label;
+    ui.tempo.textContent = String(bpm);
+    ui.meter.setAttribute(
+      'aria-label',
+      `拍号 ${METERS[meterIndex].name}，轻触切换`,
+    );
+    ui.tempo.setAttribute('aria-label', `节拍 ${bpm} BPM，轻触切换`);
+    ui.meter.disabled = starting || busy;
+    ui.tempo.disabled = starting || busy;
     ui.monitor.disabled = !ac;
     ui.monitor.setAttribute('aria-pressed', monitorOn ? 'true' : 'false');
     ui.monitor.setAttribute(
@@ -541,6 +595,7 @@
 
     const labels = {
       idle: '开始录制第一层',
+      counting: '取消倒数',
       recording: '结束第一层',
       overdubbing: '结束叠加',
       playing: layers.length >= MAX_LAYERS ? '已满五层' : '叠加一层',
@@ -810,6 +865,10 @@
 
       master = createMaster(ac);
 
+      clickBus = ac.createGain();
+      clickBus.gain.value = 1;
+      clickBus.connect(master);
+
       const micGain = ac.createGain();
       micGain.gain.value = 0.84;
 
@@ -857,6 +916,7 @@
       micStream = null;
       recorder = null;
       master = null;
+      clickBus = null;
       monitorGain = null;
       inputAnalyser = null;
       inputScratch = null;
@@ -895,6 +955,230 @@
     );
     renderChrome();
     announce(monitorOn ? '监听已开启' : '监听已关闭');
+  }
+
+  /* ---------------------------------------------------------------- */
+  /* Count-in + metronome                                              */
+  /* ---------------------------------------------------------------- */
+
+  function scheduleClick(when, { accent = false, countInTone = false, output } = {}) {
+    if (!ac || !output) return;
+    const osc = ac.createOscillator();
+    const env = ac.createGain();
+    const frequency = countInTone ? (accent ? 880 : 660) : (accent ? 1760 : 1320);
+    const peak = countInTone ? (accent ? 0.3 : 0.22) : (accent ? 0.14 : 0.09);
+    const duration = countInTone ? 0.07 : 0.032;
+    const end = when + duration;
+
+    osc.type = countInTone ? 'triangle' : 'sine';
+    osc.frequency.setValueAtTime(frequency, when);
+    if (countInTone) {
+      osc.frequency.exponentialRampToValueAtTime(frequency * 0.82, end);
+    }
+    env.gain.setValueAtTime(0.0001, when);
+    env.gain.exponentialRampToValueAtTime(peak, when + 0.004);
+    env.gain.exponentialRampToValueAtTime(0.0001, end);
+    osc.connect(env);
+    env.connect(output);
+    osc.start(when);
+    osc.stop(end + 0.03);
+    osc.onended = () => {
+      osc.disconnect();
+      env.disconnect();
+    };
+  }
+
+  function startMetronome(info, output) {
+    stopMetronome();
+    if (!ac || !output) return;
+
+    metronome = {
+      anchor: info.recordStart,
+      offset: info.offset + info.beats,
+      beat: info.beat,
+      beats: info.beats,
+      accents: info.accents,
+      nextIndex: 1,
+      timer: 0,
+      gain: output,
+    };
+
+    const schedule = () => {
+      if (!metronome || !ac) return;
+      const horizon = ac.currentTime + 0.16;
+      while (metronome.anchor + metronome.nextIndex * metronome.beat < horizon) {
+        const when = metronome.anchor + metronome.nextIndex * metronome.beat;
+        if (when >= ac.currentTime - 0.02) {
+          const index = (metronome.offset + metronome.nextIndex) % metronome.beats;
+          scheduleClick(when, {
+            accent: metronome.accents.includes(index),
+            countInTone: false,
+            output: metronome.gain,
+          });
+        }
+        metronome.nextIndex += 1;
+      }
+    };
+
+    schedule();
+    metronome.timer = window.setInterval(schedule, 40);
+  }
+
+  function stopMetronome() {
+    if (!metronome) return;
+    clearInterval(metronome.timer);
+    const gain = metronome.gain;
+    metronome = null;
+    if (!gain) return;
+    if (ac) gain.gain.setValueAtTime(0, ac.currentTime);
+    window.setTimeout(() => {
+      try { gain.disconnect(); } catch {}
+    }, 80);
+  }
+
+  function countInRemaining() {
+    if (!countIn || !ac) return 0;
+    const elapsed = Math.max(0, ac.currentTime - countIn.start);
+    const index = Math.min(
+      countIn.beats - 1,
+      Math.max(0, Math.floor(elapsed / countIn.beat)),
+    );
+    return countIn.beats - index;
+  }
+
+  function stopCountInAndMetronome() {
+    if (countIn) {
+      clearTimeout(countIn.timer);
+      if (ac) {
+        for (const gain of [countIn.countGain, countIn.metroGain]) {
+          gain.gain.setValueAtTime(0, ac.currentTime);
+          gain.disconnect();
+        }
+      }
+      countIn = null;
+    }
+    stopMetronome();
+  }
+
+  function beginCountIn(target) {
+    if (!ac || !recorder || !clickBus || countIn) return;
+    if (ac.state === 'suspended') ac.resume().catch(() => {});
+
+    const meter = METERS[meterIndex];
+    const beat = 60 / bpm;
+    const barLen = beat * meter.beats * COUNT_IN_BARS;
+    const earliest = ac.currentTime + CLICK_LEAD;
+    const aligned = target === 'overdub' && epoch && loopLen;
+    const start = aligned
+      ? epoch + Math.ceil((earliest - epoch) / beat) * beat
+      : earliest;
+    const recordStart = start + barLen;
+    const offset = aligned
+      ? ((Math.round((start - epoch) / beat) % meter.beats) + meter.beats) % meter.beats
+      : 0;
+
+    clearFlash();
+
+    const countGain = ac.createGain();
+    const metroGain = ac.createGain();
+    countGain.connect(clickBus);
+    metroGain.connect(clickBus);
+
+    record = { start: recordStart, timer: 0, target };
+    if (target === 'overdub') record.phase = phaseAt(recordStart);
+    recorder.start();
+
+    countIn = {
+      target,
+      start,
+      recordStart,
+      offset,
+      beat,
+      beats: meter.beats,
+      accents: meter.accents,
+      timer: 0,
+      countGain,
+      metroGain,
+    };
+
+    for (let i = 0; i < meter.beats; i += 1) {
+      scheduleClick(start + i * beat, {
+        accent: meter.accents.includes((offset + i) % meter.beats),
+        countInTone: true,
+        output: countGain,
+      });
+    }
+    scheduleClick(recordStart, {
+      accent: meter.accents.includes((offset + meter.beats) % meter.beats),
+      countInTone: false,
+      output: metroGain,
+    });
+
+    setMode('counting');
+    announce(
+      target === 'first'
+        ? `准备录制第一层，${meter.beats} 拍倒数`
+        : `准备叠加第 ${layers.length + 1} 层，${meter.beats} 拍倒数`,
+    );
+    countIn.timer = window.setTimeout(
+      finishCountIn,
+      Math.max(0, (recordStart - ac.currentTime) * 1000),
+    );
+  }
+
+  function finishCountIn() {
+    if (!countIn || !ac || mode !== 'counting') return;
+    if (ac.currentTime < countIn.recordStart - 0.001) {
+      countIn.timer = window.setTimeout(
+        finishCountIn,
+        Math.max(0, (countIn.recordStart - ac.currentTime) * 1000 + 1),
+      );
+      return;
+    }
+
+    const info = countIn;
+    clearTimeout(info.timer);
+    info.countGain.gain.setValueAtTime(0, ac.currentTime);
+    info.countGain.disconnect();
+    countIn = null;
+
+    if (info.target === 'first') {
+      setMode('recording');
+      announce('开始录制第一层');
+      record.timer = window.setTimeout(() => {
+        if (mode === 'recording') stopFirst(true);
+      }, MAX_SECONDS * 1000 + 80);
+    } else {
+      setMode('overdubbing');
+      announce(`开始叠加第 ${layers.length + 1} 层`);
+      record.timer = window.setTimeout(() => {
+        if (mode === 'overdubbing') stopOverdub(true);
+      }, MAX_SECONDS * 1000 + 80);
+    }
+
+    startMetronome(info, info.metroGain);
+  }
+
+  function cancelCountIn(message) {
+    if (!countIn) return;
+    const target = countIn.target;
+    stopCountInAndMetronome();
+
+    if (record) {
+      clearTimeout(record.timer);
+      record = null;
+    }
+    if (recorder && recorder.capturing) {
+      recorder.stop().catch(() => {});
+    }
+
+    setMode(target === 'first' ? 'idle' : 'playing');
+    flash(
+      typeof message === 'string' ? message : '已取消倒数',
+      target === 'first' ? '没有开始录音' : '叠加已取消',
+      1200,
+    );
+    announce(target === 'first' ? '已取消倒数，没有开始录音' : '已取消叠加倒数');
   }
 
   /* ---------------------------------------------------------------- */
@@ -972,20 +1256,12 @@
 
   function startFirst() {
     if (!ac || !recorder) return;
-    if (ac.state === 'suspended') ac.resume().catch(() => {});
-
-    clearFlash();
-    record = { start: ac.currentTime, timer: 0 };
-    recorder.start();
-    setMode('recording');
-    announce('开始录制第一层');
-    record.timer = window.setTimeout(() => {
-      if (mode === 'recording') stopFirst(true);
-    }, MAX_SECONDS * 1000 + 80);
+    beginCountIn('first');
   }
 
   async function stopFirst(auto) {
     if (mode !== 'recording' || !record) return;
+    stopMetronome();
 
     const start = record.start;
     const end = Math.min(ac.currentTime, start + MAX_SECONDS);
@@ -1038,24 +1314,12 @@
       flash('五层已满', '点环静音 · 长按圆环删除', 1600);
       return;
     }
-    if (ac.state === 'suspended') ac.resume().catch(() => {});
-
-    clearFlash();
-    record = {
-      start: ac.currentTime,
-      phase: phaseAt(ac.currentTime),
-      timer: 0,
-    };
-    recorder.start();
-    setMode('overdubbing');
-    announce(`开始叠加第 ${layers.length + 1} 层`);
-    record.timer = window.setTimeout(() => {
-      if (mode === 'overdubbing') stopOverdub(true);
-    }, MAX_SECONDS * 1000 + 80);
+    beginCountIn('overdub');
   }
 
   async function stopOverdub(auto) {
     if (mode !== 'overdubbing' || !record) return;
+    stopMetronome();
 
     const start = record.start;
     const phaseStart = record.phase;
@@ -1203,6 +1467,8 @@
   }
 
   function resetAll() {
+    if (countIn) cancelCountIn('已重置');
+    stopMetronome();
     if (!layers.length) return;
 
     if (pendingDelete) {
@@ -1245,6 +1511,15 @@
 
     if (pendingDelete) {
       confirmDelete();
+      return;
+    }
+
+    if (mode === 'counting') {
+      if (ac && countIn && ac.currentTime >= countIn.recordStart) {
+        finishCountIn();
+      } else {
+        cancelCountIn();
+      }
       return;
     }
 
@@ -1293,6 +1568,41 @@
   function handleMonitor() {
     if (!ac) return;
     setMonitor(!monitorOn);
+  }
+
+  function tempoLocked() {
+    return (
+      starting ||
+      mode === 'counting' ||
+      mode === 'recording' ||
+      mode === 'overdubbing' ||
+      mode === 'processing' ||
+      Boolean(pendingDelete)
+    );
+  }
+
+  function cycleMeter() {
+    if (tempoLocked()) return;
+    meterIndex = (meterIndex + 1) % METERS.length;
+    const meter = METERS[meterIndex];
+    flash(
+      `拍号 ${meter.label}`,
+      mode === 'playing' ? '下一次倒数生效' : `每小节 ${meter.beats} 拍`,
+      1200,
+    );
+    announce(`拍号 ${meter.name}，每小节 ${meter.beats} 拍`);
+  }
+
+  function cycleTempo() {
+    if (tempoLocked()) return;
+    const index = BPM_PRESETS.indexOf(bpm);
+    bpm = BPM_PRESETS[(index + 1) % BPM_PRESETS.length];
+    flash(
+      `节拍 ${bpm} BPM`,
+      mode === 'playing' ? '下一次倒数生效' : '倒数与节拍器已更新',
+      1200,
+    );
+    announce(`节拍 ${bpm} BPM`);
   }
 
   /* ---------------------------------------------------------------- */
@@ -1345,6 +1655,7 @@
   async function exportMix() {
     if (!layers.length || !loopN || !ac) return null;
     if (
+      mode === 'counting' ||
       mode === 'recording' ||
       mode === 'overdubbing' ||
       mode === 'processing' ||
@@ -1611,13 +1922,23 @@
   }
 
   function drawGhost(phase) {
-    if (mode !== 'recording' && mode !== 'overdubbing') return;
-    const index = mode === 'recording' ? 0 : layers.length;
+    if (mode !== 'counting' && mode !== 'recording' && mode !== 'overdubbing') {
+      return;
+    }
+    const index =
+      mode === 'overdubbing' ||
+      (mode === 'counting' && countIn && countIn.target === 'overdub')
+        ? layers.length
+        : 0;
     if (index >= MAX_LAYERS) return;
 
     const radius = ringRadius(index);
     const color =
-      mode === 'recording' ? STATE_COLORS.recording : STATE_COLORS.overdubbing;
+      mode === 'counting'
+        ? STATE_COLORS.counting
+        : mode === 'recording'
+          ? STATE_COLORS.recording
+          : STATE_COLORS.overdubbing;
 
     g.save();
     g.beginPath();
@@ -1675,6 +1996,7 @@
   function drawCenter(now) {
     const deleting = Boolean(pendingDelete);
     const color = deleting ? '#ff5a36' : activeStateColor();
+    const counting = mode === 'counting' && Boolean(countIn);
     const recording = mode === 'recording';
     const overdubbing = mode === 'overdubbing';
     const playing = mode === 'playing' && !deleting;
@@ -1711,6 +2033,13 @@
       g.arc(cx, cy, centerR, 0, Math.PI * 2);
       g.fillStyle = 'rgba(255,90,54,.07)';
       g.fill();
+    } else if (counting) {
+      g.shadowColor = rgba(color, 0.18);
+      g.shadowBlur = 22;
+      g.beginPath();
+      g.arc(cx, cy, centerR, 0, Math.PI * 2);
+      g.fillStyle = 'rgba(244,240,232,.06)';
+      g.fill();
     } else if (playing) {
       g.shadowColor = rgba(color, 0.32);
       g.shadowBlur = 28;
@@ -1737,11 +2066,13 @@
     g.strokeStyle =
       recording || overdubbing
         ? 'rgba(255,255,255,.22)'
-        : deleting
-          ? 'rgba(255,90,54,.5)'
-          : playing
-            ? 'rgba(126,214,179,.68)'
-            : 'rgba(244,240,232,.16)';
+        : counting
+          ? 'rgba(244,240,232,.28)'
+          : deleting
+            ? 'rgba(255,90,54,.5)'
+            : playing
+              ? 'rgba(126,214,179,.68)'
+              : 'rgba(244,240,232,.16)';
     g.lineWidth = 1.1;
     g.stroke();
 
@@ -1754,7 +2085,14 @@
     g.textAlign = 'center';
     g.textBaseline = 'middle';
 
-    if (recording) {
+    if (counting) {
+      g.font = `200 ${Math.round(centerR * 0.62)}px -apple-system, BlinkMacSystemFont, "SF Pro Display", "Segoe UI", sans-serif`;
+      g.fillStyle = 'rgba(244,240,232,.96)';
+      g.fillText(String(countInRemaining()), cx, cy - centerR * 0.03);
+      g.font = '600 7px -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif';
+      g.fillStyle = 'rgba(244,240,232,.42)';
+      g.fillText('COUNT IN', cx, cy + centerR * 0.3);
+    } else if (recording) {
       const size = clamp(centerR * 0.18, 11, 19);
       g.fillStyle = 'rgba(255,255,255,.95)';
       g.fillRect(cx - size / 2, cy - size / 2 - 8, size, size);
@@ -1829,6 +2167,10 @@
     if (document.hidden) {
       requestAnimationFrame(draw);
       return;
+    }
+
+    if (mode === 'counting' && countIn && ac && ac.currentTime >= countIn.recordStart) {
+      finishCountIn();
     }
 
     sampleInput();
@@ -2012,6 +2354,8 @@
     if (event.detail === 0) act();
   });
 
+  ui.meter.addEventListener('click', cycleMeter);
+  ui.tempo.addEventListener('click', cycleTempo);
   ui.monitor.addEventListener('click', handleMonitor);
   ui.export.addEventListener('click', exportMix);
   ui.reset.addEventListener('click', handleReset);
@@ -2030,10 +2374,17 @@
     if (event.metaKey || event.ctrlKey || event.altKey) return;
     const key = event.key.toLowerCase();
 
-    if (event.code === 'Escape' && pendingDelete) {
-      event.preventDefault();
-      cancelDelete('没有删除任何层');
-      return;
+    if (event.code === 'Escape') {
+      if (pendingDelete) {
+        event.preventDefault();
+        cancelDelete('没有删除任何层');
+        return;
+      }
+      if (countIn) {
+        event.preventDefault();
+        cancelCountIn();
+        return;
+      }
     }
 
     if (key === 'e') {
@@ -2048,6 +2399,10 @@
   window.addEventListener('resize', resize);
   window.addEventListener('orientationchange', () => {
     window.setTimeout(resize, 120);
+  });
+
+  document.addEventListener('visibilitychange', () => {
+    if (document.hidden && mode === 'counting') cancelCountIn();
   });
 
   /* ---------------------------------------------------------------- */
@@ -2083,6 +2438,22 @@
         audioState: ac ? ac.state : null,
         audioError: audioError ? audioError.main : null,
         pendingDelete: pendingDelete ? { index: pendingDelete.index } : null,
+        bpm,
+        meter: METERS[meterIndex].label,
+        countIn: countIn
+          ? {
+              target: countIn.target,
+              beats: countIn.beats,
+              remaining: countInRemaining(),
+              start: countIn.start,
+              recordStart: countIn.recordStart,
+              offset: countIn.offset,
+            }
+          : null,
+        metronome: Boolean(metronome),
+        record: record
+          ? { start: record.start, phase: record.phase ?? null }
+          : null,
       };
     },
     mute: toggleMute,
@@ -2090,6 +2461,7 @@
     armDelete,
     cancelDelete,
     confirmDelete,
+    cancelCountIn,
     exportWav: exportMix,
   };
 

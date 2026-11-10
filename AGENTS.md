@@ -6,10 +6,10 @@
 
 Ripple 是一个单文件浏览器循环工作站：
 
-- 打开页面 → 轻触中心录第一层 → 再轻触结束，声音变成循环
-- 继续轻触中心叠加，最多 5 层
+- 打开页面 → 轻触中心 → 一小节倒数 + 节拍器 → 录第一层 → 再轻触结束，声音变成循环
+- 继续轻触中心也会先倒数一小节，再叠加，最多 5 层
 - 点圆环静音；长按圆环进入删除确认
-- 右上角：监听、导出 WAV、重置
+- 右上角：拍号、BPM、监听、导出 WAV、重置
 
 线上地址：https://black-ei.github.io/ripple/
 仓库：https://github.com/black-ei/ripple
@@ -56,15 +56,24 @@ AGENTS.md                  本文件
 
 | 操作 | 行为 |
 | --- | --- |
-| 轻触中心 | 开始第一层 / 结束录音 / 开始叠加 / 结束叠加 |
+| 轻触中心（idle） | 一小节倒数 → 开始第一层录音 |
+| 轻触中心（recording） | 结束录音 |
+| 轻触中心（playing） | 一小节倒数 → 开始叠加，已有层继续播放 |
+| 轻触中心（overdubbing） | 结束叠加 |
+| 轻触中心（counting） | 取消倒数，不产生新层 |
 | 轻触圆环 | 静音 / 恢复该层 |
 | 长按圆环 520ms | 进入该层删除确认，不立即删除 |
 | 删除确认中轻触中心 | 确认删除该层 |
 | 删除确认中按 `Esc` / 点其他位置 / 等 5 秒 | 取消删除 |
+| 右上角 `[拍号]` | 循环 4/4 → 3/4 → 6/8；只影响下一次倒数/节拍器 |
+| 右上角 `[BPM]` | 循环 120 → 140 → 80 → 100；只影响下一次倒数/节拍器 |
 | 重置按钮 | 立即清空所有层，回到空白 |
-| `Space` | 等同于中心动作；删除确认时确认删除 |
+| `Space` | 等同于中心动作；counting 时取消；删除确认时确认删除 |
+| `Esc` | 取消倒数或删除确认 |
 | `E` | 导出 WAV |
 | `1`–`5` | 静音对应层 |
+
+倒数长度固定为一小节。4/4 四拍、3/4 三拍、6/8 六拍；6/8 重音在第 1、4 个脉冲。BPM 指每分钟脉冲数。倒数音色与录音节拍器音色必须区分；录音结束即停止节拍器。拍号/BPM 控件在 counting / recording / overdubbing / processing / 删除确认期间禁用。
 
 ### 已明确移除、不要擅自加回
 
@@ -101,22 +110,32 @@ AGENTS.md                  本文件
 - 监听默认开启，`monitorOn` 只影响监听，不影响录音。
 - 主链路：`GainNode` → `DynamicsCompressorNode` → destination。
 - 所有层的 buffer 长度等于 `loopN`。
+- 节拍器：`clickBus → master`，倒数与录音节拍器各有一个分组 gain 接 `clickBus`。**绝不接 `recordBus`**，也不加入 `OfflineAudioContext` 导出图。停止/取消时把分组 gain 静音并断开，避免已排程的 click 漏响。
+- 倒数与录音落点全部用 `ac.currentTime` 排程；录音器在倒数开始时预滚，`record.start = recordStart`，`stopFirst/stopOverdub` 用 `recorder.extract(recordStart, end)` 丢弃倒数期间的前滚。不要用 `performance.now()` 或 `setTimeout` 决定发声/切片时刻。
+- 录音节拍器用 40ms 间隔的 lookahead 排程（约 160ms 前瞻），重音按以循环 `epoch` 为 0 的拍网格 `offset` 计算；第一层 offset 为 0，叠加可能落在小节中间。停止录音时 `clearInterval` 并静音分组 gain。
+- 倒数 click：三角波 660/880 Hz，约 70ms；录音节拍器：正弦 1320/1760 Hz，约 32ms。两者必须保持明显音色差异。
 
 ### 时间与相位
 
 ```text
-loopLen = 第一层录音时长
+beat    = 60 / BPM
+bar     = 每小节拍数 × beat
+recordStart = 倒数开始 + 一小节
+loopLen = 第一层实际录音时长
 phase   = ((now - epoch) / loopLen) mod 1
 ```
 
-- 第一层决定循环长度，最长 30 秒，最短 0.6 秒。
+- 第一层决定循环长度，最长 30 秒，最短 0.6 秒；**不要量化** `loopLen`，倒数只决定录音起点。
 - 叠加最短 0.12 秒。
+- 第一层倒数结束后 `record.start = recordStart`，录音从该重拍切片；30 秒上限从 `recordStart` 起算，不包含倒数。
+- 叠加倒数从以 `epoch` 为 0 的拍网格的下一拍开始，`recordStart = countStart + bar`，`record.phase = phaseAt(recordStart)`；现有预旋转逻辑不变。
+- 叠加倒数的重音按 `offset` 计算，不假设倒数第一拍是小节重拍。
 - 叠加使用预旋转 buffer：把 PCM 从 `phaseStart * loopN` 写回循环时间轴，越界回绕。
 - 播放时每个 `AudioBufferSourceNode` 使用相同 buffer 长度，并按当前相位设置 offset。
 
 ### 导出
 
-`OfflineAudioContext` 重建所有未静音层，过与实时链路相同的压缩器，渲染成一个完整循环，再编码为 16-bit PCM WAV。不要导出录音、叠加或删除确认中的临时状态。
+`OfflineAudioContext` 重建所有未静音层，过与实时链路相同的压缩器，渲染成一个完整循环，再编码为 16-bit PCM WAV。不要导出倒数、录音、叠加或删除确认中的临时状态；节拍器与监听不进入离线图。
 
 ## 6. 代码约定
 
@@ -137,10 +156,14 @@ phase   = ((now - epoch) / loopLen) mod 1
 3. 修改后运行 `node --test "tests/*.test.mjs"`。
 4. 音频/交互改动要用真实浏览器验证：
    - 假麦克风：`--use-fake-device-for-media-stream --use-fake-ui-for-media-stream`
+   - 第一层与叠加都出现一小节倒数；4/4 / 3/4 / 6/8 的拍数与时长正确
+   - 倒数中再点中心 / `Space` / `Esc` 取消，不产生新层；叠加取消后层数不变
+   - 切换 BPM 与拍号后，倒数时长和重音按预期变化；倒数 / 录音 / 叠加期间控件禁用
    - 录音 2 层、点环静音、长按删除确认、中心确认、取消、重置
-   - WAV 导出返回 RIFF/WAVE 且字节数正确
-   - 390×844 移动端布局
-   - 无麦克风路径：错误提示正确，页面不崩
+   - `window.__RIPPLE__.state` 中 `countIn`、`metronome`、`record.start` 与状态一致
+   - WAV 导出返回 RIFF/WAVE 且字节数正确；节拍器不在导出图
+   - 390×844 与 320px 宽度移动端布局
+   - 无麦克风路径：错误提示正确，不创建 AudioContext，不进入倒数
 5. 清理临时脚本、profile、根目录截图，再提交。
 6. 涉及用户可见行为时同步更新 `README.md` 和截图。
 
@@ -149,11 +172,16 @@ phase   = ((now - epoch) / loopLen) mod 1
 - [ ] `node --test "tests/*.test.mjs"` 通过（当前 2 项）
 - [ ] `http://127.0.0.1:4173` 返回 200
 - [ ] 控制台无 error；预期麦克风失败只有一条 `console.warn`
+- [ ] 第一层与叠加都先倒数；4/4 / 3/4 / 6/8 的拍数正确
+- [ ] 倒数中取消后 `mode` 回到 `idle` / `playing`，层数不变
+- [ ] `metronome` 只在 recording / overdubbing 为 true，停止后为 false
+- [ ] 倒数 / 录音 / 叠加期间拍号与 BPM 胶囊禁用
 - [ ] 2 层现场：点环静音、长按进入删除确认、中心确认删除
 - [ ] 取消删除后层数不变
 - [ ] 重置后 `idle` / 0 层
-- [ ] WAV 头为 `RIFF` / `WAVE`
-- [ ] 移动端 390×844 无溢出、无遮挡
+- [ ] WAV 头为 `RIFF` / `WAVE`，离线图不含 click
+- [ ] 移动端 390×844 无溢出、无遮挡；320px 顶部工具不换行
+- [ ] 拒绝麦克风后 `audioState` 为 null，不进入倒数
 - [ ] 没有临时文件被 `git add`
 
 ## 9. 部署
@@ -163,7 +191,7 @@ phase   = ((now - epoch) / loopLen) mod 1
 - 验证线上版本：
 
 ```bash
-curl -s https://black-ei.github.io/ripple/ | grep -E 'resetBtn|armDelete|LONG_PRESS_MS'
+curl -s https://black-ei.github.io/ripple/ | grep -E 'resetBtn|meterBtn|tempoBtn|beginCountIn|LONG_PRESS_MS'
 ```
 
 不要改 Pages 源、不要新增部署工作流，除非用户明确要求。
