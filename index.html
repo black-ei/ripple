@@ -130,9 +130,28 @@
     border-radius:999px;
     background:rgba(244,240,232,.025);
     font:600 10px/1 var(--mono);
-    letter-spacing:.03em;
+    letter-spacing:.02em;
     font-variant-numeric:tabular-nums;
   }
+
+  .rhythm-pill{
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    gap:6px;
+    min-width:92px;
+  }
+
+  .rhythm-pill svg{
+    width:14px;
+    height:14px;
+    opacity:.5;
+    transition:opacity 180ms ease,color 180ms ease;
+  }
+
+  .rhythm-pill[data-click="on"] svg{color:var(--bone);opacity:1}
+
+  .rhythm-pill span{white-space:nowrap}
 
   .tool:hover{
     color:rgba(244,240,232,.94);
@@ -155,6 +174,126 @@
     opacity:.2;
     cursor:default;
     pointer-events:none;
+  }
+
+  .sheet-backdrop{
+    position:fixed;
+    inset:0;
+    z-index:30;
+    display:flex;
+    align-items:center;
+    justify-content:center;
+    padding:calc(env(safe-area-inset-top) + 24px) 20px calc(env(safe-area-inset-bottom) + 24px);
+    background:rgba(0,0,0,.62);
+    -webkit-backdrop-filter:blur(10px);
+    backdrop-filter:blur(10px);
+  }
+
+  .sheet-backdrop[hidden]{display:none}
+
+  .sheet{
+    width:min(92vw,360px);
+    max-height:80vh;
+    overflow:auto;
+    padding:18px 18px 16px;
+    border:1px solid rgba(244,240,232,.12);
+    border-radius:20px;
+    background:rgba(15,15,15,.97);
+    box-shadow:0 24px 80px rgba(0,0,0,.6);
+    color:var(--bone);
+  }
+
+  .sheet-head{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    margin-bottom:16px;
+  }
+
+  .sheet-title{
+    font-size:13px;
+    font-weight:600;
+    letter-spacing:.08em;
+  }
+
+  .sheet-done{
+    padding:6px;
+    border:0;
+    background:transparent;
+    color:rgba(244,240,232,.62);
+    font-size:12px;
+    cursor:pointer;
+    touch-action:manipulation;
+  }
+
+  .sheet-done:hover{color:var(--bone)}
+
+  .sheet-row{
+    display:flex;
+    align-items:center;
+    justify-content:space-between;
+    gap:12px;
+    padding:11px 0;
+    border-top:1px solid rgba(244,240,232,.06);
+  }
+
+  .sheet-head + .sheet-row{border-top:0}
+
+  .sheet-label{
+    font-size:12px;
+    color:rgba(244,240,232,.62);
+    white-space:nowrap;
+  }
+
+  .seg{
+    display:flex;
+    gap:4px;
+    flex-wrap:wrap;
+    justify-content:flex-end;
+  }
+
+  .option{
+    min-width:42px;
+    height:34px;
+    padding:0 9px;
+    border:1px solid rgba(244,240,232,.12);
+    border-radius:999px;
+    background:transparent;
+    color:rgba(244,240,232,.62);
+    font:600 10px/1 var(--mono);
+    cursor:pointer;
+    touch-action:manipulation;
+    transition:color 180ms ease,background 180ms ease,border-color 180ms ease,opacity 180ms ease;
+  }
+
+  .option:hover{
+    color:rgba(244,240,232,.94);
+    background:rgba(244,240,232,.06);
+  }
+
+  .option[aria-pressed="true"]{
+    border-color:rgba(244,240,232,.28);
+    background:rgba(244,240,232,.1);
+    color:var(--bone);
+  }
+
+  .option:disabled{
+    opacity:.28;
+    cursor:default;
+  }
+
+  .option:focus-visible,
+  .sheet-done:focus-visible{
+    outline:1px solid rgba(244,240,232,.42);
+    outline-offset:3px;
+  }
+
+  .sheet-note{
+    margin-top:14px;
+    font-size:10px;
+    line-height:1.5;
+    color:rgba(244,240,232,.34);
+    letter-spacing:.02em;
   }
 
   .center-action{
@@ -220,6 +359,11 @@
     .tool{width:32px;height:32px}
     .tool svg{width:17px;height:17px}
     .tool--pill{width:auto;min-width:42px;padding:0 8px;font-size:9px}
+    .rhythm-pill{min-width:84px;padding:0 8px;gap:5px}
+    .rhythm-pill svg{width:13px;height:13px}
+    .sheet-backdrop{align-items:flex-end;padding:0 12px calc(env(safe-area-inset-bottom) + 12px)}
+    .sheet{width:100%;max-width:none;max-height:82vh;border-radius:20px;padding:16px}
+    .option{height:38px}
     .footer{gap:6px;padding:0 18px calc(env(safe-area-inset-bottom) + 24px)}
     .hint{font-size:13px}
     .subhint{font-size:10px}
@@ -249,8 +393,14 @@
   </div>
 
   <div class="tools" role="group" aria-label="工具">
-    <button class="tool tool--pill" id="meterBtn" type="button" aria-label="拍号 四四拍，轻触切换" title="拍号">4/4</button>
-    <button class="tool tool--pill" id="tempoBtn" type="button" aria-label="节拍 120 BPM，轻触切换" title="节拍">120</button>
+    <button class="tool tool--pill rhythm-pill" id="rhythmBtn" type="button" aria-haspopup="dialog" aria-expanded="false" aria-label="节奏设置：120 BPM，四四拍，录音节拍器关闭" title="节奏">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
+        <path d="M9 3h6l4 18H5L9 3z"/>
+        <path d="M12 7l3 9"/>
+        <circle cx="15.2" cy="16.4" r="1.1" fill="currentColor" stroke="none"/>
+      </svg>
+      <span id="rhythmValue">120 · 4/4</span>
+    </button>
 
     <button class="tool" id="monitorBtn" type="button" aria-label="开启输入监听" aria-pressed="false" title="监听" disabled>
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">
@@ -284,6 +434,31 @@
   <div class="subhint" id="subhint">建议戴耳机 · 录下第一层</div>
 </footer>
 
+<div class="sheet-backdrop" id="rhythmSheet" hidden>
+  <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="rhythmTitle">
+    <div class="sheet-head">
+      <span class="sheet-title" id="rhythmTitle">节奏</span>
+      <button class="sheet-done" id="rhythmDone" type="button">完成</button>
+    </div>
+    <div class="sheet-row">
+      <span class="sheet-label">速度</span>
+      <div class="seg" id="tempoOptions" role="group" aria-label="速度"></div>
+    </div>
+    <div class="sheet-row">
+      <span class="sheet-label">拍号</span>
+      <div class="seg" id="meterOptions" role="group" aria-label="拍号"></div>
+    </div>
+    <div class="sheet-row">
+      <span class="sheet-label">录音节拍器</span>
+      <div class="seg" id="clickOptions" role="group" aria-label="录音节拍器">
+        <button class="option" type="button" data-click="off" aria-pressed="true">关</button>
+        <button class="option" type="button" data-click="on" aria-pressed="false">开</button>
+      </div>
+    </div>
+    <p class="sheet-note">倒数始终可听 · 建议戴耳机</p>
+  </div>
+</div>
+
 <div class="sr-only" id="sr" aria-live="polite"></div>
 
 <script>
@@ -296,9 +471,9 @@
   const MIN_OVERDUB = 0.12;
   const BPM_PRESETS = [80, 100, 120, 140];
   const METERS = [
-    { label: '4/4', name: '四四拍', beats: 4, accents: [0] },
-    { label: '3/4', name: '三四拍', beats: 3, accents: [0] },
-    { label: '6/8', name: '六八拍', beats: 6, accents: [0, 3] },
+    { label: '4/4', name: '四四拍', beats: 4, levels: [2, 0, 0, 0] },
+    { label: '3/4', name: '三四拍', beats: 3, levels: [2, 0, 0] },
+    { label: '6/8', name: '六八拍', beats: 6, levels: [2, 0, 0, 1, 0, 0] },
   ];
   const COUNT_IN_BARS = 1;
   const CLICK_LEAD = 0.12;
@@ -317,8 +492,13 @@
     hint: document.getElementById('hint'),
     subhint: document.getElementById('subhint'),
     center: document.getElementById('centerAction'),
-    meter: document.getElementById('meterBtn'),
-    tempo: document.getElementById('tempoBtn'),
+    rhythm: document.getElementById('rhythmBtn'),
+    rhythmValue: document.getElementById('rhythmValue'),
+    sheet: document.getElementById('rhythmSheet'),
+    rhythmDone: document.getElementById('rhythmDone'),
+    tempoOptions: document.getElementById('tempoOptions'),
+    meterOptions: document.getElementById('meterOptions'),
+    clickOptions: document.getElementById('clickOptions'),
     monitor: document.getElementById('monitorBtn'),
     export: document.getElementById('exportBtn'),
     reset: document.getElementById('resetBtn'),
@@ -348,6 +528,9 @@
   let bpm = 120;
   let meterIndex = 0;
   let clickBus = null;
+  let clickNoise = null;
+  let metronomeSound = false;
+  let sheetOpen = false;
 
   let mode = 'idle';
   let layers = [];
@@ -573,15 +756,40 @@
       Boolean(pendingDelete);
 
     ui.center.disabled = starting || processing;
-    ui.meter.textContent = METERS[meterIndex].label;
-    ui.tempo.textContent = String(bpm);
-    ui.meter.setAttribute(
+    ui.rhythmValue.textContent = `${bpm} · ${METERS[meterIndex].label}`;
+    ui.rhythm.dataset.click = metronomeSound ? 'on' : 'off';
+    ui.rhythm.setAttribute('aria-expanded', sheetOpen ? 'true' : 'false');
+    ui.rhythm.setAttribute(
       'aria-label',
-      `拍号 ${METERS[meterIndex].name}，轻触切换`,
+      `节奏设置：${bpm} BPM，${METERS[meterIndex].name}，录音节拍器${metronomeSound ? '开启' : '关闭'}`,
     );
-    ui.tempo.setAttribute('aria-label', `节拍 ${bpm} BPM，轻触切换`);
-    ui.meter.disabled = starting || busy;
-    ui.tempo.disabled = starting || busy;
+    ui.rhythm.disabled = starting || processing || Boolean(pendingDelete);
+
+    const tempoDisabled = starting || busy;
+    for (const button of ui.tempoOptions.querySelectorAll('.option')) {
+      button.setAttribute(
+        'aria-pressed',
+        Number(button.dataset.value) === bpm ? 'true' : 'false',
+      );
+      button.disabled = tempoDisabled;
+    }
+    for (const button of ui.meterOptions.querySelectorAll('.option')) {
+      button.setAttribute(
+        'aria-pressed',
+        Number(button.dataset.value) === meterIndex ? 'true' : 'false',
+      );
+      button.disabled = tempoDisabled;
+    }
+    const clickDisabled = starting || processing || Boolean(pendingDelete);
+    for (const button of ui.clickOptions.querySelectorAll('.option')) {
+      button.setAttribute(
+        'aria-pressed',
+        (button.dataset.click === 'on') === metronomeSound ? 'true' : 'false',
+      );
+      button.disabled = clickDisabled;
+    }
+    ui.sheet.hidden = !sheetOpen;
+
     ui.monitor.disabled = !ac;
     ui.monitor.setAttribute('aria-pressed', monitorOn ? 'true' : 'false');
     ui.monitor.setAttribute(
@@ -869,6 +1077,17 @@
       clickBus.gain.value = 1;
       clickBus.connect(master);
 
+      clickNoise = ac.createBuffer(
+        1,
+        Math.ceil(ac.sampleRate * 0.03),
+        ac.sampleRate,
+      );
+      const noiseData = clickNoise.getChannelData(0);
+      for (let i = 0; i < noiseData.length; i += 1) {
+        noiseData[i] =
+          (Math.random() * 2 - 1) * Math.pow(1 - i / noiseData.length, 3);
+      }
+
       const micGain = ac.createGain();
       micGain.gain.value = 0.84;
 
@@ -917,6 +1136,7 @@
       recorder = null;
       master = null;
       clickBus = null;
+      clickNoise = null;
       monitorGain = null;
       inputAnalyser = null;
       inputScratch = null;
@@ -961,30 +1181,64 @@
   /* Count-in + metronome                                              */
   /* ---------------------------------------------------------------- */
 
-  function scheduleClick(when, { accent = false, countInTone = false, output } = {}) {
+  function scheduleClick(when, { voice = 'metro', level = 0, output } = {}) {
     if (!ac || !output) return;
-    const osc = ac.createOscillator();
-    const env = ac.createGain();
-    const frequency = countInTone ? (accent ? 880 : 660) : (accent ? 1760 : 1320);
-    const peak = countInTone ? (accent ? 0.3 : 0.22) : (accent ? 0.14 : 0.09);
-    const duration = countInTone ? 0.07 : 0.032;
-    const end = when + duration;
+    const isCount = voice === 'count';
+    const bases = isCount ? [740, 620, 520] : [1240, 1040, 880];
+    const durations = isCount ? [0.06, 0.07, 0.085] : [0.03, 0.04, 0.05];
+    const peaks = isCount ? [0.12, 0.16, 0.22] : [0.055, 0.08, 0.11];
+    const safeLevel = clamp(level, 0, 2);
+    const base = bases[safeLevel];
+    const duration = durations[safeLevel];
+    const peak = peaks[safeLevel];
 
-    osc.type = countInTone ? 'triangle' : 'sine';
-    osc.frequency.setValueAtTime(frequency, when);
-    if (countInTone) {
-      osc.frequency.exponentialRampToValueAtTime(frequency * 0.82, end);
-    }
-    env.gain.setValueAtTime(0.0001, when);
-    env.gain.exponentialRampToValueAtTime(peak, when + 0.004);
-    env.gain.exponentialRampToValueAtTime(0.0001, end);
-    osc.connect(env);
-    env.connect(output);
-    osc.start(when);
-    osc.stop(end + 0.03);
-    osc.onended = () => {
-      osc.disconnect();
-      env.disconnect();
+    const body = ac.createOscillator();
+    const bodyGain = ac.createGain();
+    const lowpass = ac.createBiquadFilter();
+    body.type = isCount ? 'triangle' : 'sine';
+    body.frequency.setValueAtTime(base * 1.05, when);
+    body.frequency.exponentialRampToValueAtTime(base, when + duration * 0.8);
+    lowpass.type = 'lowpass';
+    lowpass.frequency.value = isCount ? 2800 : 3600;
+    lowpass.Q.value = 0.5;
+    bodyGain.gain.setValueAtTime(0.0001, when);
+    bodyGain.gain.exponentialRampToValueAtTime(peak, when + 0.003);
+    bodyGain.gain.exponentialRampToValueAtTime(0.0001, when + duration);
+    body.connect(bodyGain);
+    bodyGain.connect(lowpass);
+    lowpass.connect(output);
+    body.start(when);
+    body.stop(when + duration + 0.02);
+    body.onended = () => {
+      body.disconnect();
+      bodyGain.disconnect();
+      lowpass.disconnect();
+    };
+
+    if (!clickNoise) return;
+    const noise = ac.createBufferSource();
+    const bandpass = ac.createBiquadFilter();
+    const noiseGain = ac.createGain();
+    const noiseDuration = isCount ? 0.02 : 0.015;
+    noise.buffer = clickNoise;
+    bandpass.type = 'bandpass';
+    bandpass.frequency.setValueAtTime(base * 2.2, when);
+    bandpass.Q.value = 0.8;
+    noiseGain.gain.setValueAtTime(0.0001, when);
+    noiseGain.gain.exponentialRampToValueAtTime(
+      peak * (isCount ? 0.18 : 0.15),
+      when + 0.002,
+    );
+    noiseGain.gain.exponentialRampToValueAtTime(0.0001, when + noiseDuration);
+    noise.connect(bandpass);
+    bandpass.connect(noiseGain);
+    noiseGain.connect(output);
+    noise.start(when);
+    noise.stop(when + noiseDuration + 0.02);
+    noise.onended = () => {
+      noise.disconnect();
+      bandpass.disconnect();
+      noiseGain.disconnect();
     };
   }
 
@@ -997,7 +1251,7 @@
       offset: info.offset + info.beats,
       beat: info.beat,
       beats: info.beats,
-      accents: info.accents,
+      levels: info.levels,
       nextIndex: 1,
       timer: 0,
       gain: output,
@@ -1011,8 +1265,8 @@
         if (when >= ac.currentTime - 0.02) {
           const index = (metronome.offset + metronome.nextIndex) % metronome.beats;
           scheduleClick(when, {
-            accent: metronome.accents.includes(index),
-            countInTone: false,
+            voice: 'metro',
+            level: metronome.levels[index],
             output: metronome.gain,
           });
         }
@@ -1081,10 +1335,19 @@
 
     const countGain = ac.createGain();
     const metroGain = ac.createGain();
+    metroGain.gain.value = metronomeSound ? 1 : 0;
     countGain.connect(clickBus);
     metroGain.connect(clickBus);
 
-    record = { start: recordStart, timer: 0, target };
+    record = {
+      start: recordStart,
+      timer: 0,
+      target,
+      offset,
+      beat,
+      beats: meter.beats,
+      levels: meter.levels,
+    };
     if (target === 'overdub') record.phase = phaseAt(recordStart);
     recorder.start();
 
@@ -1095,7 +1358,7 @@
       offset,
       beat,
       beats: meter.beats,
-      accents: meter.accents,
+      levels: meter.levels,
       timer: 0,
       countGain,
       metroGain,
@@ -1103,14 +1366,14 @@
 
     for (let i = 0; i < meter.beats; i += 1) {
       scheduleClick(start + i * beat, {
-        accent: meter.accents.includes((offset + i) % meter.beats),
-        countInTone: true,
+        voice: 'count',
+        level: meter.levels[(offset + i) % meter.beats],
         output: countGain,
       });
     }
     scheduleClick(recordStart, {
-      accent: meter.accents.includes((offset + meter.beats) % meter.beats),
-      countInTone: false,
+      voice: 'metro',
+      level: meter.levels[offset],
       output: metroGain,
     });
 
@@ -1156,7 +1419,13 @@
       }, MAX_SECONDS * 1000 + 80);
     }
 
-    startMetronome(info, info.metroGain);
+    if (metronomeSound) {
+      info.metroGain.gain.setValueAtTime(1, ac.currentTime);
+      startMetronome(info, info.metroGain);
+    } else {
+      info.metroGain.gain.setValueAtTime(0, ac.currentTime);
+      info.metroGain.disconnect();
+    }
   }
 
   function cancelCountIn(message) {
@@ -1179,6 +1448,50 @@
       1200,
     );
     announce(target === 'first' ? '已取消倒数，没有开始录音' : '已取消叠加倒数');
+  }
+
+  function setMetronomeSound(on) {
+    if (starting || processing || pendingDelete) return;
+    metronomeSound = Boolean(on);
+
+    if (countIn && countIn.metroGain && ac) {
+      countIn.metroGain.gain.setTargetAtTime(
+        metronomeSound ? 1 : 0,
+        ac.currentTime,
+        0.01,
+      );
+    } else if (
+      (mode === 'recording' || mode === 'overdubbing') &&
+      record &&
+      ac
+    ) {
+      if (metronomeSound) {
+        if (metronome) {
+          metronome.gain.gain.setTargetAtTime(1, ac.currentTime, 0.01);
+        } else {
+          const gain = ac.createGain();
+          gain.gain.value = 1;
+          gain.connect(clickBus);
+          startMetronome(
+            {
+              recordStart: record.start,
+              offset: record.offset,
+              beat: record.beat,
+              beats: record.beats,
+              levels: record.levels,
+            },
+            gain,
+          );
+        }
+      } else {
+        stopMetronome();
+      }
+    }
+
+    renderChrome();
+    announce(
+      metronomeSound ? '录音节拍器已开启，建议戴耳机' : '录音节拍器已关闭',
+    );
   }
 
   /* ---------------------------------------------------------------- */
@@ -1503,7 +1816,7 @@
   /* ---------------------------------------------------------------- */
 
   async function act() {
-    if (processing || starting) return;
+    if (processing || starting || sheetOpen) return;
 
     const now = performance.now();
     if (now - lastActAt < 120) return;
@@ -1581,28 +1894,66 @@
     );
   }
 
-  function cycleMeter() {
-    if (tempoLocked()) return;
-    meterIndex = (meterIndex + 1) % METERS.length;
+  function setTempo(value) {
+    if (tempoLocked() || !BPM_PRESETS.includes(value)) return;
+    bpm = value;
+    renderChrome();
+    announce(`节拍 ${bpm} BPM`);
+  }
+
+  function setMeter(index) {
+    if (tempoLocked() || !Number.isInteger(index) || !METERS[index]) return;
+    meterIndex = index;
     const meter = METERS[meterIndex];
-    flash(
-      `拍号 ${meter.label}`,
-      mode === 'playing' ? '下一次倒数生效' : `每小节 ${meter.beats} 拍`,
-      1200,
-    );
+    renderChrome();
     announce(`拍号 ${meter.name}，每小节 ${meter.beats} 拍`);
   }
 
-  function cycleTempo() {
-    if (tempoLocked()) return;
-    const index = BPM_PRESETS.indexOf(bpm);
-    bpm = BPM_PRESETS[(index + 1) % BPM_PRESETS.length];
-    flash(
-      `节拍 ${bpm} BPM`,
-      mode === 'playing' ? '下一次倒数生效' : '倒数与节拍器已更新',
-      1200,
+  function openRhythmSheet() {
+    if (sheetOpen || starting || processing || pendingDelete) return;
+    sheetOpen = true;
+    renderChrome();
+    const selected = ui.tempoOptions.querySelector(
+      '.option[aria-pressed="true"]:not(:disabled)',
     );
-    announce(`节拍 ${bpm} BPM`);
+    (selected || ui.rhythmDone).focus();
+  }
+
+  function closeRhythmSheet() {
+    if (!sheetOpen) return;
+    sheetOpen = false;
+    renderChrome();
+    ui.rhythm.focus();
+  }
+
+  function buildRhythmSheet() {
+    for (const value of BPM_PRESETS) {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'option';
+      button.dataset.value = String(value);
+      button.textContent = String(value);
+      button.setAttribute('aria-pressed', 'false');
+      button.addEventListener('click', () => setTempo(value));
+      ui.tempoOptions.appendChild(button);
+    }
+
+    METERS.forEach((meter, index) => {
+      const button = document.createElement('button');
+      button.type = 'button';
+      button.className = 'option';
+      button.dataset.value = String(index);
+      button.textContent = meter.label;
+      button.setAttribute('aria-pressed', 'false');
+      button.addEventListener('click', () => setMeter(index));
+      ui.meterOptions.appendChild(button);
+    });
+
+    for (const button of ui.clickOptions.querySelectorAll('.option')) {
+      button.addEventListener('click', () =>
+        setMetronomeSound(button.dataset.click === 'on'),
+      );
+    }
   }
 
   /* ---------------------------------------------------------------- */
@@ -1921,6 +2272,98 @@
     g.restore();
   }
 
+  function visualBeatGrid() {
+    if (mode === 'counting' && countIn) {
+      return {
+        anchor: countIn.start,
+        offset: countIn.offset,
+        beat: countIn.beat,
+        beats: countIn.beats,
+        levels: countIn.levels,
+      };
+    }
+    if (
+      (mode === 'recording' || mode === 'overdubbing') &&
+      record &&
+      record.beat
+    ) {
+      return {
+        anchor: record.start,
+        offset: record.offset,
+        beat: record.beat,
+        beats: record.beats,
+        levels: record.levels,
+      };
+    }
+    if (mode === 'playing' && epoch && loopLen) {
+      const meter = METERS[meterIndex];
+      return {
+        anchor: epoch,
+        offset: 0,
+        beat: 60 / bpm,
+        beats: meter.beats,
+        levels: meter.levels,
+      };
+    }
+    return null;
+  }
+
+  function visualBeat() {
+    const grid = visualBeatGrid();
+    if (!grid || !ac) return null;
+    const elapsed = Math.max(0, ac.currentTime - grid.anchor);
+    const step = Math.floor(elapsed / grid.beat);
+    const index = ((grid.offset + step) % grid.beats + grid.beats) % grid.beats;
+    return {
+      grid,
+      index,
+      level: grid.levels[index],
+      progress: (elapsed % grid.beat) / grid.beat,
+    };
+  }
+
+  function drawBeatRing() {
+    const beat = visualBeat();
+    if (!beat) return;
+    const { grid, index, level, progress } = beat;
+    const color = pendingDelete ? '#ff5a36' : activeStateColor();
+    const radius = centerR + Math.max(15, centerR * 0.14);
+    const segment = (Math.PI * 2) / grid.beats;
+    const gap = 0.1;
+
+    g.save();
+    g.lineCap = 'round';
+    for (let i = 0; i < grid.beats; i += 1) {
+      const active = i === index;
+      let alpha = active
+        ? level === 2
+          ? 0.78
+          : level === 1
+            ? 0.55
+            : 0.38
+        : 0.15;
+      if (active && !reducedMotion) alpha += (1 - progress) * 0.18;
+      g.beginPath();
+      g.arc(
+        cx,
+        cy,
+        radius,
+        -Math.PI / 2 + i * segment + gap / 2,
+        -Math.PI / 2 + (i + 1) * segment - gap / 2,
+      );
+      g.strokeStyle = rgba(color, Math.min(0.96, alpha));
+      g.lineWidth = active
+        ? level === 2
+          ? 2.6
+          : level === 1
+            ? 2.1
+            : 1.8
+        : 1.2;
+      g.stroke();
+    }
+    g.restore();
+  }
+
   function drawGhost(phase) {
     if (mode !== 'counting' && mode !== 'recording' && mode !== 'overdubbing') {
       return;
@@ -2210,6 +2653,7 @@
 
     drawGhost(phase);
     drawCenter(now);
+    drawBeatRing();
 
     if (performance.now() - lastHintAt > 100) {
       lastHintAt = performance.now();
@@ -2354,14 +2798,44 @@
     if (event.detail === 0) act();
   });
 
-  ui.meter.addEventListener('click', cycleMeter);
-  ui.tempo.addEventListener('click', cycleTempo);
+  ui.rhythm.addEventListener('click', openRhythmSheet);
+  ui.rhythmDone.addEventListener('click', closeRhythmSheet);
+  ui.sheet.addEventListener('click', (event) => {
+    if (event.target === ui.sheet) closeRhythmSheet();
+  });
+  ui.sheet.addEventListener('keydown', (event) => {
+    if (event.code === 'Escape') {
+      event.preventDefault();
+      event.stopPropagation();
+      closeRhythmSheet();
+      return;
+    }
+    if (event.code !== 'Tab') return;
+    const focusables = [...ui.sheet.querySelectorAll('button:not(:disabled)')];
+    if (!focusables.length) return;
+    const first = focusables[0];
+    const last = focusables[focusables.length - 1];
+    if (event.shiftKey && document.activeElement === first) {
+      event.preventDefault();
+      last.focus();
+    } else if (!event.shiftKey && document.activeElement === last) {
+      event.preventDefault();
+      first.focus();
+    }
+  });
   ui.monitor.addEventListener('click', handleMonitor);
   ui.export.addEventListener('click', exportMix);
   ui.reset.addEventListener('click', handleReset);
 
   window.addEventListener('keydown', (event) => {
     if (event.repeat) return;
+    if (sheetOpen) {
+      if (event.code === 'Escape') {
+        event.preventDefault();
+        closeRhythmSheet();
+      }
+      return;
+    }
     const target = event.target;
     const inButton = target instanceof Element && target.closest('button');
 
@@ -2429,6 +2903,7 @@
       return loopLen;
     },
     get state() {
+      const beat = visualBeat();
       return {
         mode,
         layers: layers.length,
@@ -2440,6 +2915,8 @@
         pendingDelete: pendingDelete ? { index: pendingDelete.index } : null,
         bpm,
         meter: METERS[meterIndex].label,
+        metronomeSound,
+        sheetOpen,
         countIn: countIn
           ? {
               target: countIn.target,
@@ -2451,6 +2928,7 @@
             }
           : null,
         metronome: Boolean(metronome),
+        visualBeat: beat ? { index: beat.index, level: beat.level } : null,
         record: record
           ? { start: record.start, phase: record.phase ?? null }
           : null,
@@ -2462,9 +2940,15 @@
     cancelDelete,
     confirmDelete,
     cancelCountIn,
+    openRhythmSheet,
+    closeRhythmSheet,
+    setTempo,
+    setMeter,
+    setMetronomeSound,
     exportWav: exportMix,
   };
 
+  buildRhythmSheet();
   resize();
   renderChrome();
   requestAnimationFrame(draw);

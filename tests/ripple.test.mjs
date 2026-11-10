@@ -18,14 +18,18 @@ test('Ripple is a single-file loop instrument', () => {
   assert.match(html, /function armDelete/);
   assert.doesNotMatch(html, /startRerecord/);
   assert.match(html, /encodeWav/);
-  assert.match(html, /id="meterBtn"/);
-  assert.match(html, /id="tempoBtn"/);
+  assert.match(html, /id="rhythmBtn"/);
+  assert.match(html, /id="rhythmSheet"/);
   assert.match(html, /BPM_PRESETS\s*=\s*\[80,\s*100,\s*120,\s*140\]/);
   assert.match(html, /COUNT_IN_BARS\s*=\s*1/);
+  assert.match(html, /metronomeSound\s*=\s*false/);
   assert.match(html, /function beginCountIn/);
+  assert.match(html, /function setMetronomeSound/);
   assert.match(html, /function startMetronome/);
+  assert.match(html, /function drawBeatRing/);
   assert.match(html, /scheduleClick/);
-  assert.match(html, /label:\s*['"]6\/8['"]/);
+  assert.match(html, /levels:\s*\[2,\s*0,\s*0,\s*0\]/);
+  assert.match(html, /levels:\s*\[2,\s*0,\s*0,\s*1,\s*0,\s*0\]/);
 });
 
 test('Ripple inline script parses', () => {
