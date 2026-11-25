@@ -3,8 +3,10 @@ node_modules/
 .tmp-profile/
 /.ripple-profile*/
 /.ripple-denied/
+/.ripple-*
 /fake-mic.wav
 /ripple-*.png
 .DS_Store
 Thumbs.db
 *.log
+/.workbuddy/

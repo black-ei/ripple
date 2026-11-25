@@ -35,7 +35,7 @@ node --test "tests/*.test.mjs"
 index.html                 Ripple 单文件应用（唯一应用代码）
 assets/ripple.svg          favicon
 serve.mjs                  零依赖静态服务器，端口 4173
-tests/ripple.test.mjs      结构检查 + 内联脚本解析检查
+tests/ripple.test.mjs      结构检查 + 内联脚本切片测试（纯函数、录音器、节拍器）
 docs/images/               README 截图
 README.md                  用户文档
 AGENTS.md                  本文件
@@ -62,18 +62,19 @@ AGENTS.md                  本文件
 | 轻触中心（playing） | 一小节倒数 → 开始叠加，已有层继续播放 |
 | 轻触中心（overdubbing） | 结束叠加 |
 | 轻触中心（counting） | 取消倒数，不产生新层 |
+| 切到后台标签页 / 窗口（counting） | 自动取消倒数，不产生新层 |
 | 轻触圆环 | 静音 / 恢复该层 |
 | 长按圆环 520ms | 进入该层删除确认，不立即删除 |
 | 删除确认中轻触中心 | 确认删除该层 |
-| 删除确认中按 `Esc` / 点其他位置 / 等 5 秒 | 取消删除 |
+| 删除确认中按 `Esc` / 点画布其他位置 / 等 5 秒 | 取消删除。右上角监听按钮是例外：确认期间它仍可点，点了既不确认也不取消 |
 | 右上角 `[♩ BPM · 拍号]` | 打开节奏 sheet；sheet 里直接选速度、拍号、录音节拍器 |
 | 节奏 sheet 打开时 | 点背景 / `完成` / `Esc` 关闭；焦点回到节奏胶囊 |
 | 节奏 sheet 打开时按 `Space` / `E` / `1`–`5` | 不触发画布动作 |
-| 节奏 sheet 的速度/拍号 | 只影响视觉节拍、下一次倒数和录音 click；counting / recording / overdubbing 期间禁用 |
+| 节奏 sheet 的速度/拍号 | 只影响视觉节拍、下一次倒数和录音 click；counting / recording / overdubbing / processing / 删除确认期间禁用（`tempoLocked()`） |
 | 节奏 sheet 的录音节拍器 关/开 | 默认关；只控制 recording / overdubbing 的 click；倒数始终可听；录音中途可切换 |
 | 视觉节拍 | counting / recording / overdubbing / playing 始终显示；idle / processing 不显示 |
 | 重置按钮 | 立即清空所有层，回到空白 |
-| `Space` | 等同于中心动作；counting 时取消；删除确认时确认删除 |
+| `Space` / `Enter` | 焦点在中心圆或不在任何按钮上时等同于中心动作；counting 时取消；删除确认时确认删除。焦点在其他按钮上时按浏览器默认激活那个按钮；`closeRhythmSheet()` 会把焦点移回节奏胶囊，所以关掉 sheet 后紧接着按会重开它 |
 | `Esc` | 关闭节奏 sheet、取消倒数或删除确认 |
 | `E` | 导出 WAV |
 | `1`–`5` | 静音对应层 |
@@ -111,7 +112,9 @@ AGENTS.md                  本文件
 ### 图与录音
 
 - 输入：`MediaStreamAudioSourceNode` → `micGain` → `monitorGain` → `master`，同时 `micGain` → `recordBus`。
-- 录音：优先 AudioWorklet `RippleRecorder`（Blob URL），失败时回退 `ScriptProcessorNode`。
+- 录音：优先 AudioWorklet `RippleRecorder`（Blob URL），失败时回退 `ScriptProcessorNode`。回退路径的块帧号用 `event.playbackTime`；`stop()` 会等一次 `onaudioprocess`（200ms 兜底）再返回，避免丢掉不足一块的尾部。
+- `Recorder.extract()` 返回后清空 `chunks`，上一段录音不驻留到下一次 `start()`。`stop()` 只清自己等待的那个 promise，迟到的旧 `stop()` 不会清掉新一次 `start()` 的回调。
+- 麦克风轨道 `ended`（设备拔出 / 系统收回）：`handleMicEnded()` 先在 AudioContext 还活着时停掉倒数、节拍器和在录的 take，再停各层、关闭 AudioContext、清空所有层，回到 `idle` 并提示「麦克风已断开」。`stopFirst/stopOverdub` 在 `await recorder.stop()` 之后、`act()` 在 `await ac.resume()` 之后都要检查 `ac` 是否还在；下次轻触中心重新走启动顺序。
 - 监听默认开启，`monitorOn` 只影响监听，不影响录音。
 - 主链路：`GainNode` → `DynamicsCompressorNode` → destination。
 - 所有层的 buffer 长度等于 `loopN`。
@@ -119,7 +122,7 @@ AGENTS.md                  本文件
 - 录音节拍器声音默认关闭（`metronomeSound = false`）。`beginCountIn()` 创建的 `metroGain` 初始 gain 为 `metronomeSound ? 1 : 0`；`finishCountIn()` 只有开关打开时才 `startMetronome()`，否则静音并断开 `metroGain`。倒数 `countGain` 始终为 1，不受开关影响。
 - `setMetronomeSound()` 在倒数期间调整 `countIn.metroGain`；在 recording/overdubbing 期间打开时新建 gain 并从下一拍启动调度器，关闭时立即 `stopMetronome()`；空闲/播放时只记录偏好。开关不持久化。
 - 倒数与录音落点全部用 `ac.currentTime` 排程；录音器在倒数开始时预滚，`record.start = recordStart`，`stopFirst/stopOverdub` 用 `recorder.extract(recordStart, end)` 丢弃倒数期间的前滚。不要用 `performance.now()` 或 `setTimeout` 决定发声/切片时刻。
-- 录音节拍器用 40ms 间隔的 lookahead 排程（约 160ms 前瞻），重音按以循环 `epoch` 为 0 的拍网格 `offset` 计算；第一层 offset 为 0，叠加可能落在小节中间。停止录音时 `clearInterval` 并静音分组 gain。
+- 录音节拍器用 40ms 间隔的 lookahead 排程；前瞻 = 0.16s + 距上次排程实际经过的时间（按 `ac.currentTime` 计），上限一小节，仍只排未来的拍（落后超过 0.02s 的拍丢弃）。后台标签页的定时器被节流到约 1s 时，这样仍能连续排到未来的拍。重音按以循环 `epoch` 为 0 的拍网格 `offset` 计算；第一层 offset 为 0，叠加可能落在小节中间。停止录音时 `clearInterval` 并静音分组 gain。
 - click 音色：倒数三角波，level 2/1/0 基频 520/620/740 Hz、时长 85/70/60ms；录音节拍器正弦，level 2/1/0 基频 880/1040/1240 Hz、时长 50/40/30ms。两者都加短噪声瞬态（bandpass）和低通；3ms 软起音、指数衰减。倒数与录音必须明显区分，重拍/次级/弱拍必须有层级。
 - 视觉节拍不依赖声音调度器：`visualBeatGrid()` 用 countIn/record/epoch 作为锚点，`drawBeatRing()` 按 `levels` 和当前 `index` 绘制分段拍环。声音关闭时它仍然运行。
 
@@ -172,16 +175,17 @@ phase   = ((now - epoch) / loopLen) mod 1
    - 录音节拍器默认关；录音中打开/关闭 `metronomeSound` / `metronome` 同步；倒数 click 不受影响
    - 4/4 / 3/4 / 6/8 视觉拍环 4/3/6 段；counting/recording/overdubbing/playing 有，idle/processing 无
    - 录音 2 层、点环静音、长按删除确认、中心确认、取消、重置
-   - `window.__RIPPLE__.state` 中 `countIn`、`metronomeSound`、`metronome`、`visualBeat`、`record.start` 与状态一致
+   - `window.__RIPPLE__.state` 中 `countIn`、`metronomeSound`、`metronome`、`visualBeat`、`record.start`、`starting`、`recorderMode` 与状态一致
    - WAV 导出返回 RIFF/WAVE 且字节数正确；节拍器不在导出图
    - 390×844 与 320px 宽度移动端布局；顶部只四个控件
    - 无麦克风路径：错误提示正确，不创建 AudioContext，不进入倒数
+   - 麦克风轨道 `ended` 路径：层清空、`audioState` 为 null、`audioError` 为「麦克风已断开」；再轻触中心能重新启动
 5. 清理临时脚本、profile、根目录截图，再提交。
 6. 涉及用户可见行为时同步更新 `README.md` 和截图。
 
 ## 8. 验证清单
 
-- [ ] `node --test "tests/*.test.mjs"` 通过（当前 2 项）
+- [ ] `node --test "tests/*.test.mjs"` 通过（当前 27 项）
 - [ ] `http://127.0.0.1:4173` 返回 200
 - [ ] 控制台无 error；预期麦克风失败只有一条 `console.warn`
 - [ ] 第一层与叠加都先倒数；4/4 / 3/4 / 6/8 的拍数正确

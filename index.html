@@ -619,9 +619,10 @@
 
   function formatElapsed(seconds) {
     const safe = Math.max(0, Math.min(MAX_SECONDS, seconds));
-    const whole = Math.floor(safe);
-    const tenth = Math.floor((safe - whole) * 10);
-    return `00:${String(whole).padStart(2, '0')}.${tenth}`;
+    // Round before splitting: floor((2.3 - 2) * 10) is 2 in floating point.
+    const tenths = Math.round(safe * 10);
+    const whole = Math.floor(tenths / 10);
+    return `00:${String(whole).padStart(2, '0')}.${tenths % 10}`;
   }
 
   function setText(element, text) {
@@ -909,6 +910,9 @@
       this.capturing = false;
       this.stopped = null;
       this.resolveStopped = null;
+      this.draining = false;
+      this.scriptTick = null;
+      this.tickTimer = 0;
     }
 
     async init() {
@@ -934,13 +938,22 @@
       if (this.mode !== 'worklet') {
         this.node = this.ac.createScriptProcessor(4096, 1, 1);
         this.node.onaudioprocess = (event) => {
-          if (!this.capturing) return;
-          const source = event.inputBuffer.getChannelData(0);
-          const data = new Float32Array(source.length);
-          data.set(source);
-          const frame =
-            Math.round(this.ac.currentTime * this.ac.sampleRate) - data.length;
-          this.chunks.push({ frame: Math.max(0, frame), data });
+          // Keep the first block after stop(): the tail shorter than one
+          // block would be lost otherwise. extract() trims past the stop time.
+          if (this.capturing || this.draining) {
+            const source = event.inputBuffer.getChannelData(0);
+            const data = new Float32Array(source.length);
+            data.set(source);
+            const time = event.playbackTime || this.ac.currentTime;
+            const frame = Math.round(time * this.ac.sampleRate) - data.length;
+            this.chunks.push({ frame: Math.max(0, frame), data });
+          }
+          this.draining = false;
+          if (this.scriptTick) {
+            const tick = this.scriptTick;
+            this.scriptTick = null;
+            tick();
+          }
         };
         this.mode = 'script';
       }
@@ -976,16 +989,31 @@
 
     async stop() {
       if (!this.capturing) return;
+      // Keep the references this call is waiting on. A slow answer from an
+      // earlier stop() must not clear the promise of a later start().
+      const stopped = this.stopped;
+      const resolveStopped = this.resolveStopped;
       this.capturing = false;
       if (this.mode === 'worklet') {
         this.node.port.postMessage({ type: 'stop' });
         await Promise.race([
-          this.stopped || Promise.resolve(),
+          stopped || Promise.resolve(),
           new Promise((resolve) => setTimeout(resolve, 600)),
         ]);
+      } else {
+        // ScriptProcessor runs on the main thread: wait for one more
+        // callback so the tail block is delivered before extract().
+        this.draining = true;
+        await new Promise((resolve) => {
+          this.scriptTick = resolve;
+          this.tickTimer = setTimeout(resolve, 200);
+        });
+        clearTimeout(this.tickTimer);
+        this.scriptTick = null;
+        this.draining = false;
       }
-      this.stopped = null;
-      this.resolveStopped = null;
+      if (this.stopped === stopped) this.stopped = null;
+      if (this.resolveStopped === resolveStopped) this.resolveStopped = null;
     }
 
     extract(startTime, endTime) {
@@ -1007,6 +1035,8 @@
           );
         }
       }
+      // The take has been copied out: do not keep it until the next start().
+      this.chunks = [];
       return output;
     }
   }
@@ -1064,6 +1094,9 @@
           channelCount: 1,
         },
       });
+      for (const track of stream.getAudioTracks()) {
+        track.onended = handleMicEnded;
+      }
 
       context = new AudioCtor({ latencyHint: 'interactive' });
       await context.resume();
@@ -1165,6 +1198,64 @@
     }
   }
 
+  // Stop the count-in, the metronome and the take in flight without
+  // touching the layers. Must run while the AudioContext is still alive.
+  function discardTake() {
+    stopCountInAndMetronome();
+    if (record) {
+      clearTimeout(record.timer);
+      record = null;
+    }
+    if (recorder && recorder.capturing) {
+      recorder.stop().catch(() => {});
+    }
+  }
+
+  // The microphone track ended (device unplugged or capture revoked):
+  // everything recorded is silence from here on, so clear the session and
+  // let the next tap boot audio from scratch.
+  function handleMicEnded() {
+    if (!ac) return;
+    discardTake();
+
+    if (pendingDelete) {
+      clearTimeout(pendingDelete.timer);
+      pendingDelete = null;
+    }
+    for (const layer of layers) {
+      if (layer.source) {
+        try { layer.source.stop(); } catch {}
+      }
+    }
+    layers = [];
+    resetLoop();
+    clearLongPress();
+    processing = false;
+
+    if (micStream) {
+      micStream.getTracks().forEach((track) => {
+        track.onended = null;
+        track.stop();
+      });
+    }
+    ac.close().catch(() => {});
+    ac = null;
+    micStream = null;
+    recorder = null;
+    master = null;
+    clickBus = null;
+    clickNoise = null;
+    monitorGain = null;
+    inputAnalyser = null;
+    inputScratch = null;
+    monitorOn = false;
+
+    audioError = { main: '麦克风已断开', sub: '现场已清空 · 连接后轻触重试' };
+    setMode('idle');
+    flash(audioError.main, audioError.sub, 2400);
+    announce('麦克风已断开，现场已清空');
+  }
+
   function setMonitor(on) {
     if (!ac || !monitorGain) return;
     monitorOn = Boolean(on);
@@ -1253,16 +1344,22 @@
       beats: info.beats,
       levels: info.levels,
       nextIndex: 1,
+      lastAt: ac.currentTime,
       timer: 0,
       gain: output,
     };
 
     const schedule = () => {
       if (!metronome || !ac) return;
-      const horizon = ac.currentTime + 0.16;
+      const now = ac.currentTime;
+      // Background tabs throttle timers to about one second: look as far
+      // ahead as the time lost since the last pass, but never past one bar.
+      const elapsed = Math.max(0, now - metronome.lastAt);
+      metronome.lastAt = now;
+      const horizon = now + Math.min(metronome.beat * metronome.beats, 0.16 + elapsed);
       while (metronome.anchor + metronome.nextIndex * metronome.beat < horizon) {
         const when = metronome.anchor + metronome.nextIndex * metronome.beat;
-        if (when >= ac.currentTime - 0.02) {
+        if (when >= now - 0.02) {
           const index = (metronome.offset + metronome.nextIndex) % metronome.beats;
           scheduleClick(when, {
             voice: 'metro',
@@ -1591,6 +1688,10 @@
       flash('录音没有结束', '再试一次');
       return;
     }
+    if (!ac) {
+      processing = false;
+      return;
+    }
 
     const samples = recorder.extract(start, end);
     const sampleRate = ac.sampleRate;
@@ -1648,6 +1749,10 @@
       processing = false;
       setMode('playing');
       flash('叠加没有结束', '再试一次');
+      return;
+    }
+    if (!ac) {
+      processing = false;
       return;
     }
 
@@ -1713,6 +1818,7 @@
       try {
         source.stop();
         source.disconnect();
+        layer.gain.disconnect();
       } catch {}
     }, delay);
   }
@@ -1842,6 +1948,7 @@
       if (ac.state !== 'running') {
         try { await ac.resume(); } catch {}
       }
+      if (!ac) return;
       if (ac.state !== 'running') {
         flash('轻触继续', '浏览器需要一次点击来启用音频', 1800);
         return;
@@ -1852,6 +1959,7 @@
 
     if (ac.state !== 'running') {
       try { await ac.resume(); } catch {}
+      if (!ac) return;
       if (ac.state !== 'running') {
         flash('轻触继续', '浏览器需要一次点击来启用音频', 1800);
         return;
@@ -2790,6 +2898,7 @@
     if (event.code === 'Space' || event.code === 'Enter') {
       event.preventDefault();
       event.stopPropagation();
+      if (event.repeat) return;
       act();
     }
   });
@@ -2912,6 +3021,8 @@
         monitorOn,
         audioState: ac ? ac.state : null,
         audioError: audioError ? audioError.main : null,
+        starting,
+        recorderMode: recorder ? recorder.mode : null,
         pendingDelete: pendingDelete ? { index: pendingDelete.index } : null,
         bpm,
         meter: METERS[meterIndex].label,
