@@ -22,7 +22,12 @@ test('Ripple is a single-file loop instrument', () => {
   assert.match(html, /encodeWav/);
   assert.match(html, /id="rhythmBtn"/);
   assert.match(html, /id="rhythmSheet"/);
-  assert.match(html, /BPM_PRESETS\s*=\s*\[80,\s*100,\s*120,\s*140\]/);
+  assert.match(html, /BPM_MIN\s*=\s*40/);
+  assert.match(html, /BPM_MAX\s*=\s*240/);
+  assert.match(html, /id="tempoRange"[^>]*type="range"[^>]*min="40" max="240" step="1"/);
+  assert.match(html, /id="tempoValue"/);
+  assert.match(html, /id="tempoDown"/);
+  assert.match(html, /id="tempoUp"/);
   assert.match(html, /COUNT_IN_BARS\s*=\s*1/);
   assert.match(html, /metronomeSound\s*=\s*false/);
   assert.match(html, /function beginCountIn/);
@@ -338,6 +343,72 @@ test('tempoLocked covers every busy state', () => {
   assert.equal(context.tempoLocked(), true);
   context.starting = false;
   assert.equal(context.tempoLocked(), false);
+});
+
+test('normalizeTempo clamps to 40-240, rounds, and ignores empty or NaN', () => {
+  const context = load([slice('normalizeTempo')], { BPM_MIN: 40, BPM_MAX: 240 });
+  assert.equal(context.normalizeTempo(120), 120);
+  assert.equal(context.normalizeTempo(100.6), 101);
+  assert.equal(context.normalizeTempo(39), 40);
+  assert.equal(context.normalizeTempo(241), 240);
+  assert.equal(context.normalizeTempo('90'), 90);
+  assert.equal(context.normalizeTempo(''), null);
+  assert.equal(context.normalizeTempo(null), null);
+  assert.equal(context.normalizeTempo(undefined), null);
+  assert.equal(context.normalizeTempo(NaN), null);
+  assert.equal(context.normalizeTempo('abc'), null);
+});
+
+test('setTempo commits normalised tempo once and respects tempoLocked', () => {
+  const announcements = [];
+  let renders = 0;
+  const context = load([slice('normalizeTempo'), slice('setTempo')], {
+    BPM_MIN: 40,
+    BPM_MAX: 240,
+    bpm: 120,
+    tempoLocked: () => false,
+    renderChrome() { renders += 1; },
+    announce(text) { announcements.push(text); },
+  });
+  context.setTempo(999);
+  assert.equal(context.bpm, 240);
+  assert.deepEqual(announcements, ['节拍 240 BPM']);
+  context.setTempo('');
+  assert.equal(context.bpm, 240);
+  assert.deepEqual(announcements, ['节拍 240 BPM'], 'empty input stays silent');
+  context.setTempo(240);
+  assert.equal(announcements.length, 1, 'unchanged value does not re-announce');
+  assert.equal(renders, 3);
+  context.tempoLocked = () => true;
+  context.setTempo(80);
+  assert.equal(context.bpm, 240, 'locked state blocks commit');
+});
+
+test('rhythm sheet wires the slider and one-step tempo buttons', () => {
+  const source = slice('buildRhythmSheet');
+  assert.match(source, /tempoRange\.addEventListener\('input'/);
+  assert.match(source, /tempoRange\.addEventListener\('change'/);
+  assert.match(source, /tempoDown\.addEventListener\('click', \(\) => setTempo\(bpm - 1\)\)/);
+  assert.match(source, /tempoUp\.addEventListener\('click', \(\) => setTempo\(bpm \+ 1\)\)/);
+  assert.doesNotMatch(source, /BPM_PRESETS/);
+});
+
+test('rhythm sheet focuses the slider and traps input focus', () => {
+  assert.match(slice('openRhythmSheet'), /ui\.tempoRange\.disabled \? ui\.rhythmDone : ui\.tempoRange/);
+  const keydown = script.slice(
+    script.indexOf("ui.sheet.addEventListener('keydown'"),
+    script.indexOf("ui.monitor.addEventListener('click'"),
+  );
+  assert.match(keydown, /button:not\(:disabled\), input:not\(:disabled\)/);
+});
+
+test('tempo controls share the busy disable rule while click keeps its own', () => {
+  const chrome = slice('renderChrome');
+  assert.match(chrome, /ui\.tempoRange\.disabled = tempoDisabled;/);
+  assert.match(chrome, /ui\.tempoDown\.disabled = tempoDisabled;/);
+  assert.match(chrome, /ui\.tempoUp\.disabled = tempoDisabled;/);
+  assert.match(chrome, /ui\.tempoValue\.textContent = String\(bpm\);/);
+  assert.match(chrome, /const clickDisabled = starting \|\| processing \|\| Boolean\(pendingDelete\);/);
 });
 
 test('visualBeatGrid follows the state and the meter', () => {

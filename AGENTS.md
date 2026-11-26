@@ -67,10 +67,10 @@ AGENTS.md                  本文件
 | 长按圆环 520ms | 进入该层删除确认，不立即删除 |
 | 删除确认中轻触中心 | 确认删除该层 |
 | 删除确认中按 `Esc` / 点画布其他位置 / 等 5 秒 | 取消删除。右上角监听按钮是例外：确认期间它仍可点，点了既不确认也不取消 |
-| 右上角 `[♩ BPM · 拍号]` | 打开节奏 sheet；sheet 里直接选速度、拍号、录音节拍器 |
+| 右上角 `[♩ BPM · 拍号]` | 打开节奏 sheet；sheet 里用滑杆 / − / + 设置速度、选拍号、开关录音节拍器 |
 | 节奏 sheet 打开时 | 点背景 / `完成` / `Esc` 关闭；焦点回到节奏胶囊 |
 | 节奏 sheet 打开时按 `Space` / `E` / `1`–`5` | 不触发画布动作 |
-| 节奏 sheet 的速度/拍号 | 只影响视觉节拍、下一次倒数和录音 click；counting / recording / overdubbing / processing / 删除确认期间禁用（`tempoLocked()`） |
+| 节奏 sheet 的速度/拍号 | 速度 40–240 整数，滑杆步进 1，− / + 微调 1，数值只读；只影响视觉节拍、下一次倒数和录音 click；counting / recording / overdubbing / processing / 删除确认期间禁用（`tempoLocked()`） |
 | 节奏 sheet 的录音节拍器 关/开 | 默认关；只控制 recording / overdubbing 的 click；倒数始终可听；录音中途可切换 |
 | 视觉节拍 | counting / recording / overdubbing / playing 始终显示；idle / processing 不显示 |
 | 重置按钮 | 立即清空所有层，回到空白 |
@@ -79,7 +79,7 @@ AGENTS.md                  本文件
 | `E` | 导出 WAV |
 | `1`–`5` | 静音对应层 |
 
-倒数长度固定为一小节。4/4 四拍、3/4 三拍、6/8 六拍；重音层级 `levels`：`2` 强拍、`1` 次级、`0` 弱拍（6/8 第 4 拍为 `1`）。BPM 指每分钟脉冲数。录音节拍器默认关闭；倒数 click 始终可听；视觉节拍始终运行。倒数与录音 click 必须明显区分、听感柔和；录音结束即停止节拍器。速度/拍号在 counting / recording / overdubbing / processing / 删除确认期间禁用；录音 click 开关在 counting / recording / overdubbing 时仍可用。
+倒数长度固定为一小节。4/4 四拍、3/4 三拍、6/8 六拍；重音层级 `levels`：`2` 强拍、`1` 次级、`0` 弱拍（6/8 第 4 拍为 `1`）。BPM 指每分钟脉冲数，范围 40–240 整数。录音节拍器默认关闭；倒数 click 始终可听；视觉节拍始终运行。倒数与录音 click 必须明显区分、听感柔和；录音结束即停止节拍器。速度/拍号在 counting / recording / overdubbing / processing / 删除确认期间禁用；录音 click 开关在 counting / recording / overdubbing 时仍可用。
 
 ### 已明确移除、不要擅自加回
 
@@ -171,7 +171,7 @@ phase   = ((now - epoch) / loopLen) mod 1
    - 第一层与叠加都出现一小节倒数；4/4 / 3/4 / 6/8 的拍数与时长正确
    - 倒数中再点中心 / `Space` / `Esc` 取消，不产生新层；叠加取消后层数不变
    - 节奏胶囊打开 sheet；`完成` / 背景 / `Esc` 关闭；焦点回到胶囊；sheet 打开时全局快捷键不触发画布
-   - sheet 里切速度/拍号后，胶囊文本、视觉拍环段数和下一次倒数更新；录音/叠加中速度/拍号禁用
+   - sheet 里调速度/拍号后，胶囊文本、视觉拍环段数和下一次倒数更新；滑杆与 −/+ 生效，录音/叠加中速度/拍号禁用
    - 录音节拍器默认关；录音中打开/关闭 `metronomeSound` / `metronome` 同步；倒数 click 不受影响
    - 4/4 / 3/4 / 6/8 视觉拍环 4/3/6 段；counting/recording/overdubbing/playing 有，idle/processing 无
    - 录音 2 层、点环静音、长按删除确认、中心确认、取消、重置
@@ -185,7 +185,7 @@ phase   = ((now - epoch) / loopLen) mod 1
 
 ## 8. 验证清单
 
-- [ ] `node --test "tests/*.test.mjs"` 通过（当前 27 项）
+- [ ] `node --test "tests/*.test.mjs"` 通过（当前 32 项）
 - [ ] `http://127.0.0.1:4173` 返回 200
 - [ ] 控制台无 error；预期麦克风失败只有一条 `console.warn`
 - [ ] 第一层与叠加都先倒数；4/4 / 3/4 / 6/8 的拍数正确

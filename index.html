@@ -245,6 +245,45 @@
     white-space:nowrap;
   }
 
+  .tempo{
+    flex:1;
+    min-width:0;
+    display:flex;
+    align-items:center;
+    justify-content:flex-end;
+    gap:6px;
+  }
+
+  .tempo-range{
+    flex:1;
+    min-width:0;
+    height:34px;
+    margin:0;
+    accent-color:var(--mint);
+    cursor:pointer;
+    touch-action:manipulation;
+  }
+
+  .tempo-number{
+    width:38px;
+    flex:0 0 38px;
+    color:var(--bone);
+    font:600 12px/1 var(--mono);
+    text-align:right;
+    font-variant-numeric:tabular-nums;
+  }
+
+  .tempo-step{min-width:32px;width:32px;padding:0;border-radius:10px;font-size:13px}
+
+  .tempo-range:focus-visible,
+  .tempo-step:focus-visible{
+    outline:1px solid rgba(244,240,232,.42);
+    outline-offset:3px;
+  }
+
+  .tempo-range:disabled,
+  .tempo-step:disabled{opacity:.28;cursor:default}
+
   .seg{
     display:flex;
     gap:4px;
@@ -364,6 +403,7 @@
     .sheet-backdrop{align-items:flex-end;padding:0 12px calc(env(safe-area-inset-bottom) + 12px)}
     .sheet{width:100%;max-width:none;max-height:82vh;border-radius:20px;padding:16px}
     .option{height:38px}
+    .tempo-range,.tempo-step{height:38px}
     .footer{gap:6px;padding:0 18px calc(env(safe-area-inset-bottom) + 24px)}
     .hint{font-size:13px}
     .subhint{font-size:10px}
@@ -441,8 +481,13 @@
       <button class="sheet-done" id="rhythmDone" type="button">完成</button>
     </div>
     <div class="sheet-row">
-      <span class="sheet-label">速度</span>
-      <div class="seg" id="tempoOptions" role="group" aria-label="速度"></div>
+      <span class="sheet-label" id="tempoLabel">速度</span>
+      <div class="tempo" role="group" aria-labelledby="tempoLabel">
+        <input class="tempo-range" id="tempoRange" type="range" min="40" max="240" step="1" aria-label="速度滑杆" />
+        <output class="tempo-number" id="tempoValue" for="tempoRange">120</output>
+        <button class="option tempo-step" id="tempoDown" type="button" aria-label="速度减一">−</button>
+        <button class="option tempo-step" id="tempoUp" type="button" aria-label="速度加一">+</button>
+      </div>
     </div>
     <div class="sheet-row">
       <span class="sheet-label">拍号</span>
@@ -469,7 +514,8 @@
   const MAX_SECONDS = 30;
   const MIN_FIRST = 0.6;
   const MIN_OVERDUB = 0.12;
-  const BPM_PRESETS = [80, 100, 120, 140];
+  const BPM_MIN = 40;
+  const BPM_MAX = 240;
   const METERS = [
     { label: '4/4', name: '四四拍', beats: 4, levels: [2, 0, 0, 0] },
     { label: '3/4', name: '三四拍', beats: 3, levels: [2, 0, 0] },
@@ -496,7 +542,10 @@
     rhythmValue: document.getElementById('rhythmValue'),
     sheet: document.getElementById('rhythmSheet'),
     rhythmDone: document.getElementById('rhythmDone'),
-    tempoOptions: document.getElementById('tempoOptions'),
+    tempoRange: document.getElementById('tempoRange'),
+    tempoValue: document.getElementById('tempoValue'),
+    tempoDown: document.getElementById('tempoDown'),
+    tempoUp: document.getElementById('tempoUp'),
     meterOptions: document.getElementById('meterOptions'),
     clickOptions: document.getElementById('clickOptions'),
     monitor: document.getElementById('monitorBtn'),
@@ -767,13 +816,11 @@
     ui.rhythm.disabled = starting || processing || Boolean(pendingDelete);
 
     const tempoDisabled = starting || busy;
-    for (const button of ui.tempoOptions.querySelectorAll('.option')) {
-      button.setAttribute(
-        'aria-pressed',
-        Number(button.dataset.value) === bpm ? 'true' : 'false',
-      );
-      button.disabled = tempoDisabled;
-    }
+    ui.tempoRange.disabled = tempoDisabled;
+    ui.tempoDown.disabled = tempoDisabled;
+    ui.tempoUp.disabled = tempoDisabled;
+    ui.tempoRange.value = String(bpm);
+    ui.tempoValue.textContent = String(bpm);
     for (const button of ui.meterOptions.querySelectorAll('.option')) {
       button.setAttribute(
         'aria-pressed',
@@ -2002,11 +2049,25 @@
     );
   }
 
+  function normalizeTempo(value) {
+    if (value === '' || value === null || value === undefined) return null;
+    const n = Number(value);
+    if (!Number.isFinite(n)) return null;
+    return Math.min(BPM_MAX, Math.max(BPM_MIN, Math.round(n)));
+  }
+
   function setTempo(value) {
-    if (tempoLocked() || !BPM_PRESETS.includes(value)) return;
-    bpm = value;
+    const next = normalizeTempo(value);
+    if (tempoLocked()) return;
+    if (next === null) {
+      renderChrome();
+      return;
+    }
+    if (next !== bpm) {
+      bpm = next;
+      announce(`节拍 ${bpm} BPM`);
+    }
     renderChrome();
-    announce(`节拍 ${bpm} BPM`);
   }
 
   function setMeter(index) {
@@ -2021,10 +2082,7 @@
     if (sheetOpen || starting || processing || pendingDelete) return;
     sheetOpen = true;
     renderChrome();
-    const selected = ui.tempoOptions.querySelector(
-      '.option[aria-pressed="true"]:not(:disabled)',
-    );
-    (selected || ui.rhythmDone).focus();
+    (ui.tempoRange.disabled ? ui.rhythmDone : ui.tempoRange).focus();
   }
 
   function closeRhythmSheet() {
@@ -2035,16 +2093,12 @@
   }
 
   function buildRhythmSheet() {
-    for (const value of BPM_PRESETS) {
-      const button = document.createElement('button');
-      button.type = 'button';
-      button.className = 'option';
-      button.dataset.value = String(value);
-      button.textContent = String(value);
-      button.setAttribute('aria-pressed', 'false');
-      button.addEventListener('click', () => setTempo(value));
-      ui.tempoOptions.appendChild(button);
-    }
+    ui.tempoRange.addEventListener('input', () => {
+      ui.tempoValue.textContent = ui.tempoRange.value;
+    });
+    ui.tempoRange.addEventListener('change', () => setTempo(ui.tempoRange.value));
+    ui.tempoDown.addEventListener('click', () => setTempo(bpm - 1));
+    ui.tempoUp.addEventListener('click', () => setTempo(bpm + 1));
 
     METERS.forEach((meter, index) => {
       const button = document.createElement('button');
@@ -2920,7 +2974,9 @@
       return;
     }
     if (event.code !== 'Tab') return;
-    const focusables = [...ui.sheet.querySelectorAll('button:not(:disabled)')];
+    const focusables = [
+      ...ui.sheet.querySelectorAll('button:not(:disabled), input:not(:disabled)'),
+    ];
     if (!focusables.length) return;
     const first = focusables[0];
     const last = focusables[focusables.length - 1];
